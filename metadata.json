@@ -1,0 +1,6 @@
+{
+  "name": "Entreprise Tracker",
+  "description": "Recherchez les participations et investissements des entreprises françaises via l'API de l'Annuaire des Entreprises et exportez les résultats en Excel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
