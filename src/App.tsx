@@ -326,7 +326,7 @@ export default function App() {
       let isSimulationMode = false;
 
       // Générer des données via Mock API locale (pour éviter des 404 inutiles dans la console réseau)
-      allData = generateMockPermits('', 100000); 
+      allData = generateMockPermits('', 1000000); 
       isSimulationMode = true;
 
       // 2. Préparation des données pour correspondre à une table Supabase type
@@ -343,7 +343,7 @@ export default function App() {
       }));
 
       // 3. Insertion / Upsert dans Supabase (par lots pour éviter les timeout/limites sur 100k)
-      const CHUNK_SIZE = 5000;
+      const CHUNK_SIZE = 10000;
       for (let i = 0; i < recordsToInsert.length; i += CHUNK_SIZE) {
         const chunk = recordsToInsert.slice(i, i + CHUNK_SIZE);
         const { error } = await supabase
