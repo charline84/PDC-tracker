@@ -254,7 +254,7 @@ export default function App() {
   // --- ADS LOGIC (API Fetchs) ---
   const generateMockPermits = (query: string, count: number = 42): AdsResult[] => {
     return Array.from({ length: count }).map((_, i) => ({
-      id: `PC-${2023 + Math.floor(Math.random() * 2)}-${Math.floor(Math.random() * 900000)}`,
+      id: `PC-${2023 + Math.floor(Math.random() * 2)}-${Math.floor(Math.random() * 900000)}-${i}`,
       type: i % 3 === 0 ? 'Aménagement' : (i % 2 === 0 ? 'Logement' : 'Local Commercial'),
       date_depot: `2023-${String(Math.floor(Math.random() * 12) + 1).padStart(2, '0')}-${String(Math.floor(Math.random() * 28) + 1).padStart(2, '0')}`,
       date_obtention: Math.random() > 0.5 ? `2024-${String(Math.floor(Math.random() * 12) + 1).padStart(2, '0')}-${String(Math.floor(Math.random() * 28) + 1).padStart(2, '0')}` : '',
@@ -326,7 +326,7 @@ export default function App() {
       let isSimulationMode = false;
 
       // Générer des données via Mock API locale (pour éviter des 404 inutiles dans la console réseau)
-      allData = generateMockPermits('', 1000); 
+      allData = generateMockPermits('', 100000); 
       isSimulationMode = true;
 
       // 2. Préparation des données pour correspondre à une table Supabase type
@@ -342,13 +342,17 @@ export default function App() {
         description: d.description || null,
       }));
 
-      // 3. Insertion / Upsert dans Supabase
-      const { error } = await supabase
-        .from('permis_construire')
-        .upsert(recordsToInsert, { onConflict: 'id' });
+      // 3. Insertion / Upsert dans Supabase (par lots pour éviter les timeout/limites sur 100k)
+      const CHUNK_SIZE = 5000;
+      for (let i = 0; i < recordsToInsert.length; i += CHUNK_SIZE) {
+        const chunk = recordsToInsert.slice(i, i + CHUNK_SIZE);
+        const { error } = await supabase
+          .from('permis_construire')
+          .upsert(chunk, { onConflict: 'id' });
 
-      if (error) {
-        throw error;
+        if (error) {
+          throw error;
+        }
       }
 
       alert(`✅ Synchronisation réussie ! ${recordsToInsert.length} dossiers ont été ajoutés/mis à jour dans votre table Supabase.`);
