@@ -24,6 +24,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import ExcelJS from 'exceljs';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { supabase } from './supabase';
 
 interface CompanyResult {
   nom_complet: string;
@@ -280,30 +281,49 @@ export default function App() {
     setIsMockData(false);
 
     try {
-      // 1. Tenter de charger depuis l'API prévue (relative)
-      // Sur le Live Preview (sans les fichiers de données) on aura un 404, et on basculera sur le mock.
-      const fetchPromises = PERMIT_ENDPOINTS.map(url => fetch(url).then(r => r.ok ? r.json() : null).catch(() => null));
-      const results = await Promise.all(fetchPromises);
-      
       let allData: any[] = [];
-      if (results.every(r => r === null)) {
-        // Fallback: MOCK DATA
-        setIsMockData(true);
-        allData = generateMockPermits(adsQuery);
-      } else {
-        // Les fiches ont été chargées avec succès
-        results.forEach(dataset => {
-          if (Array.isArray(dataset)) {
-            allData = [...allData, ...dataset];
-          } else if (dataset?.data && Array.isArray(dataset.data)) {
-            allData = [...allData, ...dataset.data];
-          }
-        });
+
+      if (supabase) {
+        // Mode Supabase activé
+        const { data, error } = await supabase
+          .from('permis_construire')
+          .select('*')
+          .limit(100);
+          
+        if (error) {
+          console.error("Superbase error", error);
+          throw error;
+        }
+        allData = data || [];
         
-        // Simuler le filtrage très basique client-side
+        // Filtrage textuel basique côté client (à remplacer par une requête adaptative)
         if (adsQuery.trim()) {
            const queryLowerCase = adsQuery.toLowerCase();
            allData = allData.filter(d => JSON.stringify(d).toLowerCase().includes(queryLowerCase));
+        }
+      } else {
+        // Mode fallback : API locale (GitHub Pages) ou Mocks
+        const fetchPromises = PERMIT_ENDPOINTS.map(url => fetch(url).then(r => r.ok ? r.json() : null).catch(() => null));
+        const results = await Promise.all(fetchPromises);
+        
+        if (results.every(r => r === null)) {
+          // Fallback: MOCK DATA
+          setIsMockData(true);
+          allData = generateMockPermits(adsQuery);
+        } else {
+          // Les fiches ont été chargées avec succès
+          results.forEach(dataset => {
+            if (Array.isArray(dataset)) {
+              allData = [...allData, ...dataset];
+            } else if (dataset?.data && Array.isArray(dataset.data)) {
+              allData = [...allData, ...dataset.data];
+            }
+          });
+          
+          if (adsQuery.trim()) {
+             const queryLowerCase = adsQuery.toLowerCase();
+             allData = allData.filter(d => JSON.stringify(d).toLowerCase().includes(queryLowerCase));
+          }
         }
       }
 
@@ -676,9 +696,9 @@ export default function App() {
                   </div>
 
                   <div className="flex items-center justify-between">
-                    <p className={`text-xs flex items-center gap-1 font-medium px-2 py-1 rounded ${isMockData ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
+                    <p className={`text-xs flex items-center gap-1 font-medium px-2 py-1 rounded ${supabase ? 'bg-blue-100 text-blue-700' : (isMockData ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700')}`}>
                       <Server className="w-3.5 h-3.5" />
-                      {isMockData ? 'Aperçu : Données simulées' : 'Client API Prêt'}
+                      {supabase ? 'Supabase Connecté' : (isMockData ? 'Aperçu : Données simulées' : 'Client API Prêt')}
                     </p>
                     <button
                       type="submit"
