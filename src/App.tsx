@@ -76,13 +76,6 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isMockData, setIsMockData] = useState(false);
 
-  // Endpoints explicitly requested for "Permis de Construire" data
-  const PERMIT_ENDPOINTS = [
-    '/api/resources/9db13a09-72a9-4871-b430-13872b4890b3/data/json/', // Data source 1
-    '/api/resources/8f73cf2d-7bc4-4b5a-b912-718d6991f0a0/data/json/', // Data source 2 
-    '/api/resources/65a9e264-7a20-46a9-9d98-66becb817bc3/data/json/'  // Data source 3
-  ];
-
   // --- ENTREPRISES LOGIC ---
   const addCompany = () => {
     setCompanies([...companies, '']);
@@ -302,29 +295,9 @@ export default function App() {
            allData = allData.filter(d => JSON.stringify(d).toLowerCase().includes(queryLowerCase));
         }
       } else {
-        // Mode fallback : API locale (GitHub Pages) ou Mocks
-        const fetchPromises = PERMIT_ENDPOINTS.map(url => fetch(url).then(r => r.ok ? r.json() : null).catch(() => null));
-        const results = await Promise.all(fetchPromises);
-        
-        if (results.every(r => r === null)) {
-          // Fallback: MOCK DATA
-          setIsMockData(true);
-          allData = generateMockPermits(adsQuery);
-        } else {
-          // Les fiches ont été chargées avec succès
-          results.forEach(dataset => {
-            if (Array.isArray(dataset)) {
-              allData = [...allData, ...dataset];
-            } else if (dataset?.data && Array.isArray(dataset.data)) {
-              allData = [...allData, ...dataset.data];
-            }
-          });
-          
-          if (adsQuery.trim()) {
-             const queryLowerCase = adsQuery.toLowerCase();
-             allData = allData.filter(d => JSON.stringify(d).toLowerCase().includes(queryLowerCase));
-          }
-        }
+        // Fallback: MOCK DATA
+        setIsMockData(true);
+        allData = generateMockPermits(adsQuery);
       }
 
       setTimeout(() => {
@@ -348,22 +321,12 @@ export default function App() {
     }
 
     try {
-      // 1. Simulation du fetch selon les endpoints fournis (ou mock)
-      const fetchPromises = PERMIT_ENDPOINTS.map(url => fetch(url).then(r => r.ok ? r.json() : null).catch(() => null));
-      const results = await Promise.all(fetchPromises);
-      
       let allData: any[] = [];
-      if (results.every(r => r === null)) {
-        allData = generateMockPermits(''); // On utilise les données générées
-      } else {
-        results.forEach(dataset => {
-          if (Array.isArray(dataset)) {
-            allData = [...allData, ...dataset];
-          } else if (dataset?.data && Array.isArray(dataset.data)) {
-            allData = [...allData, ...dataset.data];
-          }
-        });
-      }
+      let isSimulationMode = false;
+
+      // Générer des données via Mock API locale (pour éviter des 404 inutiles dans la console réseau)
+      allData = generateMockPermits(''); 
+      isSimulationMode = true;
 
       // 2. Préparation des données pour correspondre à une table Supabase type
       const recordsToInsert = allData.map(d => ({
