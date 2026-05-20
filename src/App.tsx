@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Building2, 
   Search, 
@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ExcelJS from 'exceljs';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 
 interface CompanyResult {
   nom_complet: string;
@@ -66,12 +67,20 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'search' | 'results'>('search');
 
   // ADS State
-  const [adsSearchType, setAdsSearchType] = useState<'company' | 'permit' | 'geo'>('company');
+  const [adsSearchType, setAdsSearchType] = useState<'company' | 'permit' | 'geo'>('geo');
   const [adsQuery, setAdsQuery] = useState('');
   const [isSearchingAds, setIsSearchingAds] = useState(false);
   const [adsResults, setAdsResults] = useState<AdsResult[]>([]);
   const [adsError, setAdsError] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isMockData, setIsMockData] = useState(false);
+
+  // Endpoints explicitly requested for "Permis de Construire" data
+  const PERMIT_ENDPOINTS = [
+    '/api/resources/9db13a09-72a9-4871-b430-13872b4890b3/data/json/', // Data source 1
+    '/api/resources/8f73cf2d-7bc4-4b5a-b912-718d6991f0a0/data/json/', // Data source 2 
+    '/api/resources/65a9e264-7a20-46a9-9d98-66becb817bc3/data/json/'  // Data source 3
+  ];
 
   // --- ENTREPRISES LOGIC ---
   const addCompany = () => {
@@ -248,28 +257,63 @@ export default function App() {
     }
   };
 
-  // --- ADS LOGIC (Supabase Integration Placeholder) ---
+  // --- ADS LOGIC (API Fetchs) ---
+  const generateMockPermits = (query: string): AdsResult[] => {
+    return Array.from({ length: 42 }).map((_, i) => ({
+      id: `PC-${2023 + Math.floor(Math.random() * 2)}-${Math.floor(Math.random() * 90000)}`,
+      type: i % 3 === 0 ? 'Aménagement' : (i % 2 === 0 ? 'Logement' : 'Local Commercial'),
+      date_depot: `2023-${String(Math.floor(Math.random() * 12) + 1).padStart(2, '0')}-${String(Math.floor(Math.random() * 28) + 1).padStart(2, '0')}`,
+      date_obtention: Math.random() > 0.5 ? `2024-${String(Math.floor(Math.random() * 12) + 1).padStart(2, '0')}-${String(Math.floor(Math.random() * 28) + 1).padStart(2, '0')}` : '',
+      statut: Math.random() > 0.3 ? 'Autorisé' : 'En cours d\'instruction',
+      demandeur: ['SCI Horizon', 'NEXITY', 'BOUYGUES IMMOBILIER', 'Foncière Commune', 'Particulier'][Math.floor(Math.random() * 5)],
+      siren_demandeur: ['499311221', '330112344', '551122340', '', ''][Math.floor(Math.random() * 5)],
+      adresse: `${Math.floor(Math.random() * 100) + 1} Avenue de la République, ${query || '75010 Paris'}`,
+      description: `Construction d'une surface de ${Math.floor(Math.random() * 5000) + 100}m² pour un projet de type ${i % 3 === 0 ? 'Aménagement' : 'Logement'}.`
+    })).sort((a, b) => new Date(b.date_depot).getTime() - new Date(a.date_depot).getTime());
+  };
+
   const handleAdsSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!adsQuery.trim()) {
-      setAdsError('Veuillez entrer une valeur pour la recherche.');
-      return;
-    }
-
     setIsSearchingAds(true);
     setAdsError(null);
     setAdsResults([]);
+    setIsMockData(false);
 
     try {
-      // Pour l'instant, on simule l'appel Supabase jusqu'à sa configuration
-      // Dans le futur: await supabase.from('permis_construire').select('*').eq(...)
-      await new Promise(resolve => setTimeout(resolve, 800));
+      // 1. Tenter de charger depuis l'API prévue (relative)
+      // Sur le Live Preview (sans les fichiers de données) on aura un 404, et on basculera sur le mock.
+      const fetchPromises = PERMIT_ENDPOINTS.map(url => fetch(url).then(r => r.ok ? r.json() : null).catch(() => null));
+      const results = await Promise.all(fetchPromises);
       
-      setAdsError('Supabase non configuré. Veuillez suivre les instructions en bas de page pour connecter votre base de données contenant les données sitadel.');
+      let allData: any[] = [];
+      if (results.every(r => r === null)) {
+        // Fallback: MOCK DATA
+        setIsMockData(true);
+        allData = generateMockPermits(adsQuery);
+      } else {
+        // Les fiches ont été chargées avec succès
+        results.forEach(dataset => {
+          if (Array.isArray(dataset)) {
+            allData = [...allData, ...dataset];
+          } else if (dataset?.data && Array.isArray(dataset.data)) {
+            allData = [...allData, ...dataset.data];
+          }
+        });
+        
+        // Simuler le filtrage très basique client-side
+        if (adsQuery.trim()) {
+           const queryLowerCase = adsQuery.toLowerCase();
+           allData = allData.filter(d => JSON.stringify(d).toLowerCase().includes(queryLowerCase));
+        }
+      }
 
+      setTimeout(() => {
+         setAdsResults(allData);
+         setIsSearchingAds(false);
+      }, 500); // Petit délai pour le style
     } catch (err) {
-      setAdsError('Erreur de connexion au serveur ADS.');
-    } finally {
+      setIsMockData(true);
+      setAdsResults(generateMockPermits(adsQuery));
       setIsSearchingAds(false);
     }
   };
@@ -279,7 +323,8 @@ export default function App() {
     // Simulation of a cron/sync job
     setTimeout(() => {
       setIsSyncing(false);
-      alert("La synchronisation des données depuis data.gouv.fr se fait généralement via un script backend (Github Actions) car le fichier est trop lourd pour le navigateur. (Voir les instructions)");
+      alert("En mode GitHub Pages, vos fichiers JSON seront interrogés directement depuis le répertoire `/api/resources/...`. Assurez-vous que vos Actions GitHub poussent bien ces extraits.");
+
     }, 1500);
   };
 
@@ -577,8 +622,8 @@ export default function App() {
                 {/* Database Sync Panel */}
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 text-left">
                   <div>
-                     <h3 className="font-bold text-amber-900 text-sm">Gestion de la base de données (Supabase)</h3>
-                     <p className="text-xs text-amber-700 mt-1">Dernière mise à jour : <strong>Vérification...</strong></p>
+                     <h3 className="font-bold text-amber-900 text-sm">Gestion des données locales</h3>
+                     <p className="text-xs text-amber-700 mt-1">Connexion aux endpoints <strong>/api/resources/.../data/json</strong></p>
                   </div>
                   <button 
                     onClick={syncDatabase}
@@ -586,19 +631,19 @@ export default function App() {
                     className="px-4 py-2 bg-white border border-amber-300 text-amber-700 rounded-lg text-sm font-bold shadow-sm hover:bg-amber-100 transition-colors flex items-center gap-2"
                   >
                     <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-                    {isSyncing ? 'Synchronisation...' : 'Télécharger depuis data.gouv.fr'}
+                    {isSyncing ? 'Synchronisation...' : 'Statut API'}
                   </button>
                 </div>
               </div>
 
-              <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-200 overflow-hidden max-w-3xl mx-auto">
+              <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-200 overflow-hidden max-w-3xl mx-auto mb-8">
                 <div className="flex border-b border-slate-100">
                   <button 
                     onClick={() => { setAdsSearchType('company'); setAdsQuery(''); }}
                     className={`flex-1 py-4 font-medium text-sm transition-all flex flex-col items-center gap-1 ${adsSearchType === 'company' ? 'bg-amber-50 text-amber-700 border-b-2 border-amber-600' : 'text-slate-500 hover:bg-slate-50'}`}
                   >
                     <Building2 className="w-5 h-5" />
-                    Par Société / Porteur
+                    Par Porteur
                   </button>
                   <button 
                     onClick={() => { setAdsSearchType('permit'); setAdsQuery(''); }}
@@ -612,7 +657,7 @@ export default function App() {
                     className={`flex-1 py-4 font-medium text-sm transition-all flex flex-col items-center gap-1 border-l border-slate-100 ${adsSearchType === 'geo' ? 'bg-amber-50 text-amber-700 border-b-2 border-amber-600' : 'text-slate-500 hover:bg-slate-50'}`}
                   >
                     <Map className="w-5 h-5" />
-                    Zone Géographique
+                    Zone / Commune
                   </button>
                 </div>
                 
@@ -624,38 +669,158 @@ export default function App() {
                     <input
                       type="text"
                       className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all placeholder:text-slate-400 font-medium"
-                      placeholder="Attente de connexion à Supabase..."
+                      placeholder={adsSearchType === 'company' ? 'Ex: NEXITY, SCI Horizon' : adsSearchType === 'permit' ? 'Ex: PC-2023-xxxx' : 'Ex: 75010, Paris, Lyon...'}
                       value={adsQuery}
                       onChange={(e) => setAdsQuery(e.target.value)}
                     />
                   </div>
 
                   <div className="flex items-center justify-between">
-                    <p className="text-xs text-amber-600 flex items-center gap-1 font-medium bg-amber-50 px-2 py-1 rounded">
+                    <p className={`text-xs flex items-center gap-1 font-medium px-2 py-1 rounded ${isMockData ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
                       <Server className="w-3.5 h-3.5" />
-                      Client Supabase non connecté
+                      {isMockData ? 'Aperçu : Données simulées' : 'Client API Prêt'}
                     </p>
                     <button
                       type="submit"
                       disabled={isSearchingAds}
                       className="px-6 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white rounded-xl font-bold shadow-md shadow-amber-600/20 transition-all cursor-pointer flex items-center gap-2"
                     >
-                      {isSearchingAds ? <><Loader2 className="w-4 h-4 animate-spin"/> Recherche...</> : 'Rechercher'}
+                      {isSearchingAds ? <><Loader2 className="w-4 h-4 animate-spin"/> Recherche...</> : 'Lancer la recherche'}
                     </button>
                   </div>
                 </form>
               </div>
 
-              {adsError && (
-                <div className="max-w-3xl mx-auto">
-                  <div className="bg-slate-800 text-slate-200 px-6 py-6 rounded-xl text-sm flex flex-col gap-4 shadow-xl border border-slate-700">
-                    <div className="flex items-center gap-2 text-amber-400 font-bold text-lg">
-                      <Database className="w-5 h-5" />
-                      Configuration Requise
+              {adsResults.length > 0 && (
+                <div className="mt-8 space-y-6">
+                  {/* Statistiques rapides */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-white border border-slate-200 p-4 rounded-xl flex flex-col justify-center items-center text-center shadow-sm">
+                      <span className="text-3xl font-black text-slate-800">{adsResults.length}</span>
+                      <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-1">Dossiers</span>
                     </div>
-                    <p className="text-slate-300">
-                      Le fichier des autorisations d'urbanisme complet pèse plusieurs gigaoctets. L'architecture optimale pour héberger votre application gratuitement sur <strong>GitHub Pages</strong> consiste à utiliser <strong>Supabase</strong> comme base de données.
-                    </p>
+                    <div className="bg-white border border-slate-200 p-4 rounded-xl flex flex-col justify-center items-center text-center shadow-sm">
+                      <span className="text-3xl font-black text-emerald-600">
+                        {adsResults.filter(r => r.statut?.toLowerCase().includes('autorisé')).length}
+                      </span>
+                      <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-1">Autorisés</span>
+                    </div>
+                    <div className="bg-white border border-slate-200 p-4 rounded-xl flex flex-col justify-center items-center text-center shadow-sm">
+                      <span className="text-3xl font-black text-blue-600">
+                        {adsResults.filter(r => r.type?.toLowerCase().includes('logement')).length}
+                      </span>
+                      <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-1">Logements</span>
+                    </div>
+                    <div className="bg-white border border-slate-200 p-4 rounded-xl flex flex-col justify-center items-center text-center shadow-sm">
+                      <span className="text-3xl font-black text-purple-600">
+                        {Math.floor(adsResults.reduce((acc, curr) => acc + (curr.surface || 0), 0) / 1000)}k
+                      </span>
+                      <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-1">m² de surface</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Graphique Types */}
+                    <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm h-72">
+                      <h4 className="font-bold text-slate-800 text-sm mb-4">Répartition par type</h4>
+                      <ResponsiveContainer width="100%" height="80%">
+                        <PieChart>
+                          <Pie
+                            data={Object.entries(adsResults.reduce((acc, curr) => {
+                              const type = curr.type || 'Autre';
+                              acc[type] = (acc[type] || 0) + 1;
+                              return acc;
+                            }, {} as Record<string, number>)).map(([name, value]) => ({ name, value }))}
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={80}
+                            fill="#8884d8"
+                            dataKey="value"
+                            label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                          >
+                            <Cell key="cell-0" fill="#3b82f6" />
+                            <Cell key="cell-1" fill="#f59e0b" />
+                            <Cell key="cell-2" fill="#10b981" />
+                            <Cell key="cell-3" fill="#6366f1" />
+                            <Cell key="cell-4" fill="#8b5cf6" />
+                          </Pie>
+                          <Tooltip />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* Graphique Statuts */}
+                    <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm h-72">
+                      <h4 className="font-bold text-slate-800 text-sm mb-4">États des dossiers</h4>
+                      <ResponsiveContainer width="100%" height="80%">
+                        <BarChart
+                          data={Object.entries(adsResults.reduce((acc, curr) => {
+                            const statut = curr.statut || 'Inconnu';
+                            acc[statut] = (acc[statut] || 0) + 1;
+                            return acc;
+                          }, {} as Record<string, number>)).map(([name, value]) => ({ name, value }))}
+                          layout="vertical"
+                        >
+                          <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                          <XAxis type="number" />
+                          <YAxis dataKey="name" type="category" width={100} fontSize={10} />
+                          <Tooltip />
+                          <Bar dataKey="value" fill="#f59e0b" radius={[0, 4, 4, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-end mb-2 mt-4 mt-8">
+                    <div>
+                      <h3 className="text-xl font-bold text-slate-800">Dossiers d'urbanisme</h3>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {adsResults.slice(0, 50).map((permit, idx) => (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: Math.min(idx * 0.05, 0.5) }}
+                        key={`${permit.id}-${idx}`}
+                        className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm hover:shadow-md transition-shadow"
+                      >
+                        <div className="flex justify-between items-start mb-3">
+                          <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
+                            {permit.id}
+                          </span>
+                          <span className={`text-xs font-bold px-2 py-1 rounded ${permit.statut === 'Autorisé' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {permit.statut || 'Inconnu'}
+                          </span>
+                        </div>
+                        <h4 className="font-bold text-lg text-slate-800 mb-1">{permit.type || 'Permis'}</h4>
+                        <p className="text-sm font-medium text-slate-600 mb-4">{permit.demandeur || 'Non renseigné'}</p>
+                        
+                        <div className="space-y-2 text-sm">
+                          <div className="flex items-start gap-2 text-slate-600">
+                            <MapPin className="w-4 h-4 mt-0.5 text-slate-400 shrink-0" />
+                            <span className="line-clamp-2">{permit.adresse || permit.commune || 'Adresse non renseignée'}</span>
+                          </div>
+                          
+                          {(permit.date_depot || permit.date_obtention) && (
+                            <div className="flex items-center gap-2 text-slate-600">
+                              <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
+                              <span>
+                                {permit.date_depot && `Dépôt: ${formatDate(permit.date_depot)}`}
+                                {permit.date_depot && permit.date_obtention && ' • '}
+                                {permit.date_obtention && `Décision: ${formatDate(permit.date_obtention)}`}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        
+                        {permit.description && (
+                          <div className="mt-4 pt-4 border-t border-slate-100">
+                            <p className="text-xs text-slate-500 line-clamp-3">{permit.description}</p>
+                          </div>
+                        )}
+                      </motion.div>
+                    ))}
                   </div>
                 </div>
               )}
