@@ -252,9 +252,9 @@ export default function App() {
   };
 
   // --- ADS LOGIC (API Fetchs) ---
-  const generateMockPermits = (query: string): AdsResult[] => {
-    return Array.from({ length: 42 }).map((_, i) => ({
-      id: `PC-${2023 + Math.floor(Math.random() * 2)}-${Math.floor(Math.random() * 90000)}`,
+  const generateMockPermits = (query: string, count: number = 42): AdsResult[] => {
+    return Array.from({ length: count }).map((_, i) => ({
+      id: `PC-${2023 + Math.floor(Math.random() * 2)}-${Math.floor(Math.random() * 900000)}`,
       type: i % 3 === 0 ? 'Aménagement' : (i % 2 === 0 ? 'Logement' : 'Local Commercial'),
       date_depot: `2023-${String(Math.floor(Math.random() * 12) + 1).padStart(2, '0')}-${String(Math.floor(Math.random() * 28) + 1).padStart(2, '0')}`,
       date_obtention: Math.random() > 0.5 ? `2024-${String(Math.floor(Math.random() * 12) + 1).padStart(2, '0')}-${String(Math.floor(Math.random() * 28) + 1).padStart(2, '0')}` : '',
@@ -262,7 +262,8 @@ export default function App() {
       demandeur: ['SCI Horizon', 'NEXITY', 'BOUYGUES IMMOBILIER', 'Foncière Commune', 'Particulier'][Math.floor(Math.random() * 5)],
       siren_demandeur: ['499311221', '330112344', '551122340', '', ''][Math.floor(Math.random() * 5)],
       adresse: `${Math.floor(Math.random() * 100) + 1} Avenue de la République, ${query || '75010 Paris'}`,
-      description: `Construction d'une surface de ${Math.floor(Math.random() * 5000) + 100}m² pour un projet de type ${i % 3 === 0 ? 'Aménagement' : 'Logement'}.`
+      description: `Construction d'une surface de ${Math.floor(Math.random() * 5000) + 100}m² pour un projet de type ${i % 3 === 0 ? 'Aménagement' : 'Logement'}.`,
+      surface: Math.floor(Math.random() * 5000) + 100
     })).sort((a, b) => new Date(b.date_depot).getTime() - new Date(a.date_depot).getTime());
   };
 
@@ -281,7 +282,7 @@ export default function App() {
         const { data, error } = await supabase
           .from('permis_construire')
           .select('*')
-          .limit(100);
+          .limit(1000);
           
         if (error) {
           console.error("Superbase error", error);
@@ -325,7 +326,7 @@ export default function App() {
       let isSimulationMode = false;
 
       // Générer des données via Mock API locale (pour éviter des 404 inutiles dans la console réseau)
-      allData = generateMockPermits(''); 
+      allData = generateMockPermits('', 1000); 
       isSimulationMode = true;
 
       // 2. Préparation des données pour correspondre à une table Supabase type
@@ -811,10 +812,13 @@ export default function App() {
                   <div className="flex justify-between items-end mb-2 mt-4 mt-8">
                     <div>
                       <h3 className="text-xl font-bold text-slate-800">Dossiers d'urbanisme</h3>
+                      <p className="text-sm text-slate-500">
+                        {adsResults.length > 100 ? `Affichage des 100 premiers résultats sur ${adsResults.length}` : `${adsResults.length} résultats affichés`}
+                      </p>
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {adsResults.slice(0, 50).map((permit, idx) => (
+                    {adsResults.slice(0, 100).map((permit, idx) => (
                       <motion.div
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
