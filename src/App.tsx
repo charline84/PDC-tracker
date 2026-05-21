@@ -290,27 +290,25 @@ export default function App() {
       let allData: any[] = [];
 
       if (supabase) {
-        // Mode Supabase activé
-        const { data, error } = await supabase
-          .from('permis_construire')
-          .select('*')
-          .limit(1000);
+        // Mode Supabase activé : On interroge directement l'API (Server-side filtering) pour éviter de tout charger
+        let query = supabase.from('permis_construire').select('*');
+        
+        if (adsQuery.trim()) {
+          const searchTerm = `%${adsQuery}%`;
+          query = query.or(`adresse.ilike.${searchTerm},demandeur.ilike.${searchTerm},description.ilike.${searchTerm},type.ilike.${searchTerm}`);
+        }
+        
+        const { data, error } = await query.limit(100);
           
         if (error) {
           console.error("Superbase error", error);
           throw error;
         }
         allData = data || [];
-        
-        // Filtrage textuel basique côté client (à remplacer par une requête adaptative)
-        if (adsQuery.trim()) {
-           const queryLowerCase = adsQuery.toLowerCase();
-           allData = allData.filter(d => JSON.stringify(d).toLowerCase().includes(queryLowerCase));
-        }
       } else {
-        // Fallback: MOCK DATA
+        // Fallback: MOCK DATA (Génération à la volée, pas besoin de télécharger 100k)
         setIsMockData(true);
-        allData = generateMockPermits(adsQuery);
+        allData = generateMockPermits(adsQuery, 100);
       }
 
       setTimeout(() => {
@@ -321,70 +319,6 @@ export default function App() {
       setIsMockData(true);
       setAdsResults(generateMockPermits(adsQuery));
       setIsSearchingAds(false);
-    }
-  };
-
-  const syncDatabase = async () => {
-    setIsSyncing(true);
-    
-    if (!supabase) {
-      alert("⚠️ Supabase n'est pas encore connecté. Ajoutez vos clés (Supabase URL et Anon Key) dans vos variables d'environnement (.env local ou GitHub Secrets).");
-      setIsSyncing(false);
-      return;
-    }
-
-    try {
-      let allData: any[] = [];
-      let isSimulationMode = false;
-
-      // Générer des données via Mock API locale (pour éviter des 404 inutiles dans la console réseau)
-      allData = generateMockPermits('', 1000000); 
-      isSimulationMode = true;
-
-      // 2. Préparation des données pour correspondre à une table Supabase type
-      const recordsToInsert = allData.map(d => ({
-        id: String(d.id),
-        type: d.type || null,
-        date_depot: d.date_depot || null,
-        date_obtention: d.date_obtention || null,
-        statut: d.statut || null,
-        demandeur: d.demandeur || null,
-        siren_demandeur: d.siren_demandeur || null,
-        adresse: d.adresse || null,
-        description: d.description || null,
-      }));
-
-      // 3. Insertion / Upsert dans Supabase (par lots pour éviter les timeout/limites)
-      // On réduit la taille des lots pour éviter l'erreur "canceling statement due to statement timeout" (max 8s sur supabase)
-      const CHUNK_SIZE = 2500;
-      let insertedCount = 0;
-      for (let i = 0; i < recordsToInsert.length; i += CHUNK_SIZE) {
-        const chunk = recordsToInsert.slice(i, i + CHUNK_SIZE);
-        const { error } = await supabase
-          .from('permis_construire')
-          .upsert(chunk, { onConflict: 'id' });
-
-        if (error) {
-          throw error;
-        }
-        insertedCount += chunk.length;
-        setSyncProgress(`Progression : ${insertedCount} / ${recordsToInsert.length}`);
-      }
-
-      setSyncProgress(null);
-      alert(`✅ Synchronisation réussie ! ${recordsToInsert.length} dossiers ont été ajoutés/mis à jour dans votre table Supabase.`);
-      
-      // Relancer la recherche pour afficher les données fraiches
-      if (adsQuery) {
-         handleAdsSearch(new Event('submit') as unknown as React.FormEvent);
-      }
-      
-    } catch (err: any) {
-      console.error("Erreur de synchronisation:", err);
-      alert("❌ Erreur lors de la synchronisation Supabase: " + (err.message || "La table 'permis_construire' n'existe peut-être pas ou les colonnes ne correspondent pas.") + "\n\nAvez-vous bien créé la table avec les bonnes colonnes dans votre projet Supabase ?");
-    } finally {
-      setIsSyncing(false);
-      setSyncProgress(null);
     }
   };
 
@@ -677,23 +611,7 @@ export default function App() {
                   <Database className="w-8 h-8 text-amber-600" />
                 </div>
                 <h2 className="text-3xl font-bold text-slate-900 mb-2">Permis de Construire (OpentData)</h2>
-                <p className="text-slate-600 mb-4">Module connecté à la base de données gouvernementale (Sitadel). Les données étant volumineuses, elles nécessitent une base de données de relais (ex: Supabase).</p>
-                
-                {/* Database Sync Panel */}
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 text-left">
-                  <div>
-                     <h3 className="font-bold text-amber-900 text-sm">Gestion de la base de données Centrale (Supabase)</h3>
-                     <p className="text-xs text-amber-700 mt-1">Importation des données depuis les sources API vers votre base Supabase.</p>
-                  </div>
-                  <button 
-                    onClick={syncDatabase}
-                    disabled={isSyncing}
-                    className="px-4 py-2 bg-white border border-amber-300 text-amber-700 rounded-lg text-sm font-bold shadow-sm hover:bg-amber-100 transition-colors flex items-center gap-2"
-                  >
-                    <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-                    {isSyncing ? (syncProgress ? syncProgress : 'Synchronisation...') : 'Synchroniser vers Supabase'}
-                  </button>
-                </div>
+                <p className="text-slate-600 mb-4">Module connecté à la base de données. Interrogation directe de l'API Supabase pour un affichage instantané sans téléchargement.</p>
               </div>
 
               <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-200 overflow-hidden max-w-3xl mx-auto mb-8">
