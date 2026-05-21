@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import NAF_CODES from '@socialgouv/codes-naf';
 import { 
   Building2, 
   Search, 
@@ -57,6 +58,16 @@ interface AdsResult {
   description: string;
 }
 
+const getNafLabel = (codeStr: string) => {
+  if (!codeStr) return '';
+  const codePart = codeStr.trim().split(' ')[0];
+  const found = (NAF_CODES as any[]).find((n) => n.id === codePart);
+  if (found) {
+    return `${codePart} - ${found.label}`;
+  }
+  return codeStr;
+};
+
 export default function App() {
   const [activeModule, setActiveModule] = useState<'entreprises' | 'ads'>('entreprises');
   
@@ -74,6 +85,7 @@ export default function App() {
   const [adsResults, setAdsResults] = useState<AdsResult[]>([]);
   const [adsError, setAdsError] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<string | null>(null);
   const [isMockData, setIsMockData] = useState(false);
 
   // --- ENTREPRISES LOGIC ---
@@ -208,7 +220,7 @@ export default function App() {
           siren: result.siren || "",
           date_creation: result.date_creation || "",
           date_fermeture: result.date_fermeture || "",
-          code_naf: result.activite_principale || "",
+          code_naf: getNafLabel(result.activite_principale) || "",
           naf_2025: result.activite_principale_naf25 || "",
           dirigeants: dirigeantsStr,
           adresse: adresseStr,
@@ -342,8 +354,10 @@ export default function App() {
         description: d.description || null,
       }));
 
-      // 3. Insertion / Upsert dans Supabase (par lots pour éviter les timeout/limites sur 100k)
-      const CHUNK_SIZE = 10000;
+      // 3. Insertion / Upsert dans Supabase (par lots pour éviter les timeout/limites)
+      // On réduit la taille des lots pour éviter l'erreur "canceling statement due to statement timeout" (max 8s sur supabase)
+      const CHUNK_SIZE = 2500;
+      let insertedCount = 0;
       for (let i = 0; i < recordsToInsert.length; i += CHUNK_SIZE) {
         const chunk = recordsToInsert.slice(i, i + CHUNK_SIZE);
         const { error } = await supabase
@@ -353,8 +367,11 @@ export default function App() {
         if (error) {
           throw error;
         }
+        insertedCount += chunk.length;
+        setSyncProgress(`Progression : ${insertedCount} / ${recordsToInsert.length}`);
       }
 
+      setSyncProgress(null);
       alert(`✅ Synchronisation réussie ! ${recordsToInsert.length} dossiers ont été ajoutés/mis à jour dans votre table Supabase.`);
       
       // Relancer la recherche pour afficher les données fraiches
@@ -367,6 +384,7 @@ export default function App() {
       alert("❌ Erreur lors de la synchronisation Supabase: " + (err.message || "La table 'permis_construire' n'existe peut-être pas ou les colonnes ne correspondent pas.") + "\n\nAvez-vous bien créé la table avec les bonnes colonnes dans votre projet Supabase ?");
     } finally {
       setIsSyncing(false);
+      setSyncProgress(null);
     }
   };
 
@@ -623,7 +641,7 @@ export default function App() {
                                 <div className="flex gap-1.5 items-start">
                                   <Briefcase className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
                                   <div className="text-slate-600 flex flex-wrap gap-x-2 gap-y-1 items-center">
-                                    <span className="font-semibold text-slate-700">{result.activite_principale}</span>
+                                    <span className="font-semibold text-slate-700">{getNafLabel(result.activite_principale)}</span>
                                     {result.activite_principale_naf25 && (
                                       <span className="text-xs bg-slate-100 text-slate-500 px-1.5 rounded">NAF 2025: {result.activite_principale_naf25}</span>
                                     )}
@@ -673,7 +691,7 @@ export default function App() {
                     className="px-4 py-2 bg-white border border-amber-300 text-amber-700 rounded-lg text-sm font-bold shadow-sm hover:bg-amber-100 transition-colors flex items-center gap-2"
                   >
                     <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-                    {isSyncing ? 'Synchronisation...' : 'Synchroniser vers Supabase'}
+                    {isSyncing ? (syncProgress ? syncProgress : 'Synchronisation...') : 'Synchroniser vers Supabase'}
                   </button>
                 </div>
               </div>
@@ -743,19 +761,29 @@ export default function App() {
                     </div>
                     <div className="bg-white border border-slate-200 p-4 rounded-xl flex flex-col justify-center items-center text-center shadow-sm">
                       <span className="text-3xl font-black text-emerald-600">
-                        {adsResults.filter(r => r.statut?.toLowerCase().includes('autorisé')).length}
+                        {adsResults.filter(r => r.statut?.toLowerCase().includes('autoris') || r.statut?.toLowerCase().includes('accord')).length}
                       </span>
                       <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-1">Autorisés</span>
                     </div>
                     <div className="bg-white border border-slate-200 p-4 rounded-xl flex flex-col justify-center items-center text-center shadow-sm">
                       <span className="text-3xl font-black text-blue-600">
-                        {adsResults.filter(r => r.type?.toLowerCase().includes('logement')).length}
+                        {adsResults.filter(r => r.type?.toLowerCase().includes('logement') || r.description?.toLowerCase().includes('logement')).length}
                       </span>
                       <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-1">Logements</span>
                     </div>
                     <div className="bg-white border border-slate-200 p-4 rounded-xl flex flex-col justify-center items-center text-center shadow-sm">
                       <span className="text-3xl font-black text-purple-600">
-                        {Math.floor(adsResults.reduce((acc, curr) => acc + (curr.surface || 0), 0) / 1000)}k
+                        {(() => {
+                           const totalSurface = adsResults.reduce((acc, curr) => {
+                             let s = curr.surface || 0;
+                             if (!s && curr.description) {
+                               const match = curr.description.match(/(\d+)\s*m/i);
+                               if (match) s = parseInt(match[1], 10);
+                             }
+                             return acc + s;
+                           }, 0);
+                           return totalSurface > 1000 ? `${Math.floor(totalSurface / 1000)}k` : totalSurface;
+                        })()}
                       </span>
                       <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-1">m² de surface</span>
                     </div>
