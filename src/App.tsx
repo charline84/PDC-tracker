@@ -292,12 +292,12 @@ export default function App() {
          if (/^\d{9}$/.test(query.trim())) {
            url += `&SIREN_DEM__exact=${query.trim()}`;
          } else {
-           url += `&DENOM_DEM__icontains=${encodeURIComponent(query.trim())}`;
+           url += `&DENOM_DEM__contains=${encodeURIComponent(query.trim())}`;
          }
       } else if (type === 'permit' && query.trim()) {
-         url += `&NUM_DAU__icontains=${encodeURIComponent(query.trim())}`;
+         url += `&NUM_DAU__contains=${encodeURIComponent(query.trim())}`;
       } else if (type === 'geo' && query.trim()) {
-         url += `&ADR_CODPOST_TER__icontains=${encodeURIComponent(query.trim())}`;
+         url += `&ADR_CODPOST_TER__contains=${encodeURIComponent(query.trim())}`;
       }
       
       const response = await fetch(url);
@@ -363,7 +363,7 @@ export default function App() {
               <div className="bg-blue-600 p-2 rounded-lg">
                 <Building2 className="text-white w-5 h-5" />
               </div>
-              <h1 className="text-xl font-bold tracking-tight text-slate-800 hidden sm:block">Entreprise Tracker</h1>
+              <h1 className="text-xl font-bold tracking-tight text-slate-800 hidden sm:block">Développement commercial</h1>
             </div>
 
             <nav className="hidden md:flex gap-1">
@@ -857,7 +857,7 @@ export default function App() {
       </main>
       
       <footer className="max-w-5xl mx-auto px-4 py-8 text-center border-t border-slate-200 mt-12 bg-white flex flex-col sm:flex-row items-center justify-between">
-        <p className="text-slate-500 text-sm">&copy; {new Date().getFullYear()} Entreprise Tracker.</p>
+        <p className="text-slate-500 text-sm">&copy; {new Date().getFullYear()} Développement commercial.</p>
         <div className="flex gap-4 mt-4 sm:mt-0 text-xs text-slate-400 font-medium items-center">
           <Github className="w-4 h-4" />
           <span>Architecture Serverless</span>
