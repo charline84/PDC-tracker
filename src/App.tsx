@@ -56,6 +56,7 @@ interface AdsResult {
   siren_demandeur: string;
   adresse: string;
   description: string;
+  surface?: number;
 }
 
 const getNafLabel = (codeStr: string) => {
@@ -279,47 +280,68 @@ export default function App() {
     })).sort((a, b) => new Date(b.date_depot).getTime() - new Date(a.date_depot).getTime());
   };
 
-  const handleAdsSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const triggerAdsSearch = async (query: string, type: 'company' | 'permit' | 'geo') => {
     setIsSearchingAds(true);
     setAdsError(null);
     setAdsResults([]);
     setIsMockData(false);
 
     try {
-      let allData: any[] = [];
-
-      if (supabase) {
-        // Mode Supabase activé : On interroge directement l'API (Server-side filtering) pour éviter de tout charger
-        let query = supabase.from('permis_construire').select('*');
-        
-        if (adsQuery.trim()) {
-          const searchTerm = `%${adsQuery}%`;
-          query = query.or(`adresse.ilike.${searchTerm},demandeur.ilike.${searchTerm},description.ilike.${searchTerm},type.ilike.${searchTerm}`);
-        }
-        
-        const { data, error } = await query.limit(100);
-          
-        if (error) {
-          console.error("Superbase error", error);
-          throw error;
-        }
-        allData = data || [];
-      } else {
-        // Fallback: MOCK DATA (Génération à la volée, pas besoin de télécharger 100k)
-        setIsMockData(true);
-        allData = generateMockPermits(adsQuery, 100);
+      let url = 'https://tabular-api.data.gouv.fr/api/resources/65a9e264-7a20-46a9-9d98-66becb817bc3/data/?page=1&page_size=100';
+      if (type === 'company' && query.trim()) {
+         if (/^\d{9}$/.test(query.trim())) {
+           url += `&SIREN_DEM__exact=${query.trim()}`;
+         } else {
+           url += `&DENOM_DEM__icontains=${encodeURIComponent(query.trim())}`;
+         }
+      } else if (type === 'permit' && query.trim()) {
+         url += `&NUM_DAU__icontains=${encodeURIComponent(query.trim())}`;
+      } else if (type === 'geo' && query.trim()) {
+         url += `&ADR_CODPOST_TER__icontains=${encodeURIComponent(query.trim())}`;
+      }
+      
+      const response = await fetch(url);
+      const resData = await response.json();
+      
+      if (!response.ok) {
+         throw new Error(resData.error || 'Erreur API');
       }
 
-      setTimeout(() => {
-         setAdsResults(allData);
-         setIsSearchingAds(false);
-      }, 500); // Petit délai pour le style
-    } catch (err) {
-      setIsMockData(true);
-      setAdsResults(generateMockPermits(adsQuery));
+      const allData = (resData.data || []).map((d: any) => {
+        let statut = 'En cours / Projet';
+        if (d.ETAT_DAU === 5 || d.ETAT_DAU === 8) statut = 'Autorisé';
+        if (d.ETAT_DAU === 6) statut = 'Ouverture de chantier';
+        
+        let typeStr = 'Autre';
+        if (d.NATURE_PROJET_COMPLETEE === 1) typeStr = 'Nouvelle construction';
+        else if (d.NATURE_PROJET_COMPLETEE === 2) typeStr = 'Extension';
+        
+        return {
+          id: d.NUM_DAU || d.__id?.toString(),
+          type: typeStr,
+          date_depot: d.DR_DEPOT || `${d.AN_DEPOT || ''}`,
+          date_obtention: d.DATE_REELLE_AUTORISATION || '',
+          statut: statut,
+          demandeur: d.DENOM_DEM || 'Non renseigné',
+          siren_demandeur: d.SIREN_DEM || '',
+          adresse: [d.ADR_NUM_TER, d.ADR_LIBVOIE_TER, d.ADR_LIEUDIT_TER, d.ADR_CODPOST_TER, d.ADR_LOCALITE_TER].filter(Boolean).join(' '),
+          description: `Surface Habitable: ${d.SURF_HAB_CREEE || 0}m², Logements créés: ${d.NB_LGT_TOT_CREES || 0}`,
+          surface: d.SURF_HAB_CREEE || 0
+        };
+      });
+
+      setAdsResults(allData);
+    } catch (err: any) {
+      console.error(err);
+      setAdsError('Erreur lors de la récupération des données réelles: ' + err.message);
+    } finally {
       setIsSearchingAds(false);
     }
+  };
+
+  const handleAdsSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    triggerAdsSearch(adsQuery, adsSearchType);
   };
 
   const formatDate = (dateStr: string) => {
@@ -552,7 +574,21 @@ export default function App() {
                                   {result.nom_complet || result.nom_raison_sociale}
                                 </h3>
                                 <div className="flex flex-wrap items-center gap-2 mt-2">
-                                  <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">SIREN: {result.siren}</span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      setActiveModule('ads');
+                                      setAdsSearchType('company');
+                                      setAdsQuery(result.siren);
+                                      triggerAdsSearch(result.siren, 'company');
+                                    }}
+                                    className="text-[10px] cursor-pointer font-mono text-slate-500 bg-slate-100 hover:bg-amber-100 hover:text-amber-800 hover:border-amber-300 px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1 transition-all"
+                                    title="Chercher des permis de construire pour ce porteur"
+                                  >
+                                    SIREN: {result.siren}
+                                    <HardHat className="w-3 h-3" />
+                                  </button>
                                   <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${
                                     result.siege?.etat_administratif === 'A' || !result.date_fermeture ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'
                                   }`}>
