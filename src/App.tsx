@@ -25,7 +25,6 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import ExcelJS from 'exceljs';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
-import { supabase } from './supabase';
 
 interface CompanyResult {
   nom_complet: string;
@@ -57,6 +56,7 @@ interface AdsResult {
   adresse: string;
   description: string;
   surface?: number;
+  logements?: number;
 }
 
 const getNafLabel = (codeStr: string) => {
@@ -88,6 +88,47 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState<string | null>(null);
   const [isMockData, setIsMockData] = useState(false);
+
+  const [adsFilterLogements, setAdsFilterLogements] = useState('all');
+  const [adsFilterDate, setAdsFilterDate] = useState('all');
+  const [adsFilterStatus, setAdsFilterStatus] = useState('all');
+
+  const filteredAdsResults = useMemo(() => {
+    return adsResults.filter(r => {
+      // Logements
+      const nbLogements = r.logements || 0;
+      if (adsFilterLogements === 'lt_15' && nbLogements >= 15) return false;
+      if (adsFilterLogements === '15_50' && (nbLogements < 15 || nbLogements > 50)) return false;
+      if (adsFilterLogements === 'gt_50' && nbLogements <= 50) return false;
+
+      // Date
+      if (adsFilterDate !== 'all') {
+        const d = r.date_depot || r.date_obtention;
+        if (!d) return false;
+        
+        const datePermis = new Date(d);
+        const now = new Date();
+        const monthDiff = (now.getFullYear() - datePermis.getFullYear()) * 12 + now.getMonth() - datePermis.getMonth();
+
+        if (adsFilterDate === '3_months' && monthDiff > 3) return false;
+        if (adsFilterDate === '6_months' && monthDiff > 6) return false;
+        if (adsFilterDate === '1_year' && monthDiff > 12) return false;
+        if (adsFilterDate === '3_years' && monthDiff > 36) return false;
+      }
+
+      // Status
+      if (adsFilterStatus !== 'all') {
+         const statut = r.statut.toLowerCase();
+         if (adsFilterStatus === 'autorise' && !(statut.includes('autoris') || statut.includes('accord'))) return false;
+         if (adsFilterStatus === 'en_cours' && !statut.includes('cours')) return false;
+         if (adsFilterStatus === 'ouverture' && !statut.includes('ouverture')) return false;
+         if (adsFilterStatus === 'refuse' && !statut.includes('refus')) return false;
+         if (adsFilterStatus === 'depot' && !statut.includes('dépôt') && !statut.includes('depot')) return false;
+      }
+
+      return true;
+    });
+  }, [adsResults, adsFilterLogements, adsFilterDate, adsFilterStatus]);
 
   // --- ENTREPRISES LOGIC ---
   const addCompany = () => {
@@ -287,34 +328,53 @@ export default function App() {
     setIsMockData(false);
 
     try {
-      let url = 'https://tabular-api.data.gouv.fr/api/resources/65a9e264-7a20-46a9-9d98-66becb817bc3/data/?page=1&page_size=100';
+      let baseUrl = 'https://tabular-api.data.gouv.fr/api/resources/65a9e264-7a20-46a9-9d98-66becb817bc3/data/?page_size=200';
       if (type === 'company' && query.trim()) {
          if (/^\d{9}$/.test(query.trim())) {
-           url += `&SIREN_DEM__exact=${query.trim()}`;
+           baseUrl += `&SIREN_DEM__exact=${query.trim()}`;
          } else {
-           url += `&DENOM_DEM__contains=${encodeURIComponent(query.trim())}`;
+           baseUrl += `&DENOM_DEM__contains=${encodeURIComponent(query.trim())}`;
          }
       } else if (type === 'permit' && query.trim()) {
-         url += `&NUM_DAU__contains=${encodeURIComponent(query.trim())}`;
+         baseUrl += `&NUM_DAU__contains=${encodeURIComponent(query.trim())}`;
       } else if (type === 'geo' && query.trim()) {
          if (/^\d+$/.test(query.trim())) {
-           url += `&ADR_CODPOST_TER__contains=${encodeURIComponent(query.trim())}`;
+           baseUrl += `&ADR_CODPOST_TER__contains=${encodeURIComponent(query.trim())}`;
          } else {
-           url += `&ADR_LOCALITE_TER__contains=${encodeURIComponent(query.trim().toUpperCase())}`;
+           baseUrl += `&ADR_LOCALITE_TER__contains=${encodeURIComponent(query.trim().toUpperCase())}`;
          }
       }
       
-      const response = await fetch(url);
-      const resData = await response.json();
+      let allDataRaw: any[] = [];
+      let page = 1;
+      const maxPages = 20; // 4000 résultats max client-side
       
-      if (!response.ok) {
-         throw new Error(resData.error || 'Erreur API');
+      while (page <= maxPages) {
+        const url = `${baseUrl}&page=${page}`;
+        const response = await fetch(url);
+        const resData = await response.json();
+        
+        if (!response.ok) {
+           if (page === 1) throw new Error(resData.error || resData.errors?.[0]?.detail || 'Erreur API');
+           break;
+        }
+
+        if (!resData.data || resData.data.length === 0) break;
+        
+        allDataRaw = allDataRaw.concat(resData.data);
+        
+        const total = resData.meta?.total || 0;
+        if (allDataRaw.length >= total) break;
+        
+        page++;
       }
 
-      const allData = (resData.data || []).map((d: any) => {
+      const allData = allDataRaw.map((d: any) => {
         let statut = 'En cours / Projet';
         if (d.ETAT_DAU === 5 || d.ETAT_DAU === 8) statut = 'Autorisé';
         if (d.ETAT_DAU === 6) statut = 'Ouverture de chantier';
+        if (d.ETAT_DAU === 9) statut = 'Refusé';
+        if (d.ETAT_DAU === 2) statut = 'Dépôt';
         
         let typeStr = 'Autre';
         if (d.NATURE_PROJET_COMPLETEE === 1) typeStr = 'Nouvelle construction';
@@ -330,7 +390,8 @@ export default function App() {
           siren_demandeur: d.SIREN_DEM || '',
           adresse: [d.ADR_NUM_TER, d.ADR_LIBVOIE_TER, d.ADR_LIEUDIT_TER, d.ADR_CODPOST_TER, d.ADR_LOCALITE_TER].filter(Boolean).join(' '),
           description: `Surface Habitable: ${d.SURF_HAB_CREEE || 0}m², Logements créés: ${d.NB_LGT_TOT_CREES || 0}`,
-          surface: d.SURF_HAB_CREEE || 0
+          surface: d.SURF_HAB_CREEE || 0,
+          logements: d.NB_LGT_TOT_CREES || 0
         };
       });
 
@@ -711,35 +772,74 @@ export default function App() {
 
               {adsResults.length > 0 && (
                 <div className="mt-8 space-y-6">
+                  {/* Filtres */}
+                  <div className="bg-white border border-slate-200 p-4 rounded-xl flex flex-wrap gap-4 shadow-sm relative z-20">
+                    <div className="flex-1 min-w-[200px]">
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Logements</label>
+                      <select 
+                        value={adsFilterLogements} 
+                        onChange={(e) => setAdsFilterLogements(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                      >
+                        <option value="all">Tous (0 et +)</option>
+                        <option value="lt_15">Moins de 15</option>
+                        <option value="15_50">15 à 50</option>
+                        <option value="gt_50">Plus de 50</option>
+                      </select>
+                    </div>
+                    <div className="flex-1 min-w-[200px]">
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Date (Dépôt/Obtention)</label>
+                      <select 
+                        value={adsFilterDate} 
+                        onChange={(e) => setAdsFilterDate(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                      >
+                        <option value="all">Toutes dates</option>
+                        <option value="3_months">Depuis 3 mois</option>
+                        <option value="6_months">Depuis 6 mois</option>
+                        <option value="1_year">Depuis 1 an</option>
+                        <option value="3_years">Depuis 3 ans</option>
+                      </select>
+                    </div>
+                    <div className="flex-1 min-w-[200px]">
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">État du dossier</label>
+                      <select 
+                        value={adsFilterStatus} 
+                        onChange={(e) => setAdsFilterStatus(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                      >
+                        <option value="all">Tous statuts</option>
+                        <option value="autorise">Autorisé</option>
+                        <option value="en_cours">En cours / Projet</option>
+                        <option value="ouverture">Ouverture de chantier</option>
+                        <option value="refuse">Refusé</option>
+                        <option value="depot">Dépôt</option>
+                      </select>
+                    </div>
+                  </div>
+
                   {/* Statistiques rapides */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div className="bg-white border border-slate-200 p-4 rounded-xl flex flex-col justify-center items-center text-center shadow-sm">
-                      <span className="text-3xl font-black text-slate-800">{adsResults.length}</span>
+                      <span className="text-3xl font-black text-slate-800">{filteredAdsResults.length}</span>
                       <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-1">Dossiers</span>
                     </div>
                     <div className="bg-white border border-slate-200 p-4 rounded-xl flex flex-col justify-center items-center text-center shadow-sm">
                       <span className="text-3xl font-black text-emerald-600">
-                        {adsResults.filter(r => r.statut?.toLowerCase().includes('autoris') || r.statut?.toLowerCase().includes('accord')).length}
+                        {filteredAdsResults.filter(r => r.statut?.toLowerCase().includes('autoris') || r.statut?.toLowerCase().includes('accord')).length}
                       </span>
                       <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-1">Autorisés</span>
                     </div>
                     <div className="bg-white border border-slate-200 p-4 rounded-xl flex flex-col justify-center items-center text-center shadow-sm">
                       <span className="text-3xl font-black text-blue-600">
-                        {adsResults.filter(r => r.type?.toLowerCase().includes('logement') || r.description?.toLowerCase().includes('logement')).length}
+                        {filteredAdsResults.reduce((acc, curr) => acc + (curr.logements || 0), 0)}
                       </span>
                       <span className="text-xs font-medium text-slate-500 uppercase tracking-wider mt-1">Logements</span>
                     </div>
                     <div className="bg-white border border-slate-200 p-4 rounded-xl flex flex-col justify-center items-center text-center shadow-sm">
                       <span className="text-3xl font-black text-purple-600">
                         {(() => {
-                           const totalSurface = adsResults.reduce((acc, curr) => {
-                             let s = curr.surface || 0;
-                             if (!s && curr.description) {
-                               const match = curr.description.match(/(\d+)\s*m/i);
-                               if (match) s = parseInt(match[1], 10);
-                             }
-                             return acc + s;
-                           }, 0);
+                           const totalSurface = filteredAdsResults.reduce((acc, curr) => acc + (curr.surface || 0), 0);
                            return totalSurface > 1000 ? `${Math.floor(totalSurface / 1000)}k` : totalSurface;
                         })()}
                       </span>
@@ -754,7 +854,7 @@ export default function App() {
                       <ResponsiveContainer width="100%" height="80%">
                         <PieChart>
                           <Pie
-                            data={Object.entries(adsResults.reduce((acc, curr) => {
+                            data={Object.entries(filteredAdsResults.reduce((acc, curr) => {
                               const type = curr.type || 'Autre';
                               acc[type] = (acc[type] || 0) + 1;
                               return acc;
@@ -782,7 +882,7 @@ export default function App() {
                       <h4 className="font-bold text-slate-800 text-sm mb-4">États des dossiers</h4>
                       <ResponsiveContainer width="100%" height="80%">
                         <BarChart
-                          data={Object.entries(adsResults.reduce((acc, curr) => {
+                          data={Object.entries(filteredAdsResults.reduce((acc, curr) => {
                             const statut = curr.statut || 'Inconnu';
                             acc[statut] = (acc[statut] || 0) + 1;
                             return acc;
@@ -803,12 +903,12 @@ export default function App() {
                     <div>
                       <h3 className="text-xl font-bold text-slate-800">Dossiers d'urbanisme</h3>
                       <p className="text-sm text-slate-500">
-                        {adsResults.length > 100 ? `Affichage des 100 premiers résultats sur ${adsResults.length}` : `${adsResults.length} résultats affichés`}
+                        {filteredAdsResults.length} résultats affichés
                       </p>
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {adsResults.slice(0, 100).map((permit, idx) => (
+                    {filteredAdsResults.map((permit, idx) => (
                       <motion.div
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -825,7 +925,25 @@ export default function App() {
                           </span>
                         </div>
                         <h4 className="font-bold text-lg text-slate-800 mb-1">{permit.type || 'Permis'}</h4>
-                        <p className="text-sm font-medium text-slate-600 mb-4">{permit.demandeur || 'Non renseigné'}</p>
+                        <div className="text-sm font-medium text-slate-600 mb-4">
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              const query = permit.siren_demandeur || permit.demandeur;
+                              if (query) {
+                                setActiveModule('entreprises');
+                                setCompanies([query]);
+                                handleSearch(undefined, [query]);
+                              }
+                            }}
+                            className="hover:text-blue-600 hover:underline inline-flex items-center gap-1 transition-colors text-left focus:outline-none"
+                            title="Rechercher ce promoteur dans Entreprises et Participations"
+                          >
+                            {permit.demandeur || 'Non renseigné'}
+                            {permit.demandeur && <Search className="w-3 h-3 text-slate-400" />}
+                          </button>
+                        </div>
                         
                         <div className="space-y-2 text-sm">
                           <div className="flex items-start gap-2 text-slate-600">
