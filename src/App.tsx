@@ -287,7 +287,7 @@ export default function App() {
     setIsMockData(false);
 
     try {
-      let url = '/api/proxy-ads?page=1&page_size=100';
+      let url = 'https://tabular-api.data.gouv.fr/api/resources/65a9e264-7a20-46a9-9d98-66becb817bc3/data/?page=1&page_size=100';
       if (type === 'company' && query.trim()) {
          if (/^\d{9}$/.test(query.trim())) {
            url += `&SIREN_DEM__exact=${query.trim()}`;
