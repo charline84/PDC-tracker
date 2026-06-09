@@ -297,7 +297,11 @@ export default function App() {
       } else if (type === 'permit' && query.trim()) {
          url += `&NUM_DAU__contains=${encodeURIComponent(query.trim())}`;
       } else if (type === 'geo' && query.trim()) {
-         url += `&ADR_CODPOST_TER__contains=${encodeURIComponent(query.trim())}`;
+         if (/^\d+$/.test(query.trim())) {
+           url += `&ADR_CODPOST_TER__contains=${encodeURIComponent(query.trim())}`;
+         } else {
+           url += `&ADR_LOCALITE_TER__contains=${encodeURIComponent(query.trim().toUpperCase())}`;
+         }
       }
       
       const response = await fetch(url);
@@ -690,9 +694,9 @@ export default function App() {
                   </div>
 
                   <div className="flex items-center justify-between">
-                    <p className={`text-xs flex items-center gap-1 font-medium px-2 py-1 rounded ${supabase ? 'bg-blue-100 text-blue-700' : (isMockData ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700')}`}>
+                    <p className="text-xs flex items-center gap-1 font-medium px-2 py-1 rounded bg-green-100 text-green-700">
                       <Server className="w-3.5 h-3.5" />
-                      {supabase ? 'Supabase Connecté' : (isMockData ? 'Aperçu : Données simulées' : 'Client API Prêt')}
+                      Client API Prêt
                     </p>
                     <button
                       type="submit"
