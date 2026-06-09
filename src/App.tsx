@@ -25,6 +25,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import ExcelJS from 'exceljs';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+import MapComponent from './components/MapComponent';
 
 interface CompanyResult {
   nom_complet: string;
@@ -45,7 +46,7 @@ interface CompanyResult {
   _search_term: string;
 }
 
-interface AdsResult {
+export interface AdsResult {
   id: string;
   type: string;
   date_depot: string;
@@ -92,6 +93,10 @@ export default function App() {
   const [adsFilterLogements, setAdsFilterLogements] = useState('all');
   const [adsFilterDate, setAdsFilterDate] = useState('all');
   const [adsFilterStatus, setAdsFilterStatus] = useState('all');
+  const [adsViewMode, setAdsViewMode] = useState<'list' | 'map'>('list');
+
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [password, setPassword] = useState('');
 
   const filteredAdsResults = useMemo(() => {
     return adsResults.filter(r => {
@@ -418,6 +423,41 @@ export default function App() {
       return dateStr;
     }
   };
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 max-w-sm w-full relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-indigo-500"></div>
+          <div className="flex justify-center mb-6">
+            <div className="bg-blue-50 p-3 rounded-xl inline-block">
+              <Building2 className="text-blue-600 w-8 h-8" />
+            </div>
+          </div>
+          <h2 className="text-2xl font-black text-slate-800 mb-2 text-center">Accès Restreint</h2>
+          <p className="text-slate-500 text-sm text-center mb-6">Veuillez vous authentifier pour accéder à la base de données.</p>
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            if (password === 'admin123' || password === 'urbanisme' || password === 'charline') setIsAuthenticated(true);
+            else alert('Mot de passe incorrect');
+          }}>
+            <input 
+              type="password" 
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-4 py-3 mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-shadow"
+              placeholder="Mot de passe"
+              autoFocus
+            />
+            <button type="submit" className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2">
+              Déverrouiller
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
@@ -906,16 +946,34 @@ export default function App() {
                         {filteredAdsResults.length} résultats affichés
                       </p>
                     </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {filteredAdsResults.map((permit, idx) => (
-                      <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: Math.min(idx * 0.05, 0.5) }}
-                        key={`${permit.id}-${idx}`}
-                        className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm hover:shadow-md transition-shadow"
+                    <div className="flex bg-slate-100 rounded-lg p-1">
+                      <button
+                        onClick={() => setAdsViewMode('list')}
+                        className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${adsViewMode === 'list' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                       >
+                        Liste
+                      </button>
+                      <button
+                        onClick={() => setAdsViewMode('map')}
+                        className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${adsViewMode === 'map' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                      >
+                        Carte
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {adsViewMode === 'map' ? (
+                    <MapComponent results={filteredAdsResults} />
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {filteredAdsResults.map((permit, idx) => (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: Math.min(idx * 0.05, 0.5) }}
+                          key={`${permit.id}-${idx}`}
+                          className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm hover:shadow-md transition-shadow"
+                        >
                         <div className="flex justify-between items-start mb-3">
                           <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
                             {permit.id}
@@ -971,6 +1029,7 @@ export default function App() {
                       </motion.div>
                     ))}
                   </div>
+                  )}
                 </div>
               )}
             </motion.div>
