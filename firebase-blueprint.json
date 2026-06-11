@@ -1,0 +1,21 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the application",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "isApproved": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile and role"
+    }
+  }
+}
