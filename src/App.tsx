@@ -79,6 +79,8 @@ export default function App() {
   
   // Entreprises State
   const [companies, setCompanies] = useState<string[]>(['']);
+  const [geoFilter, setGeoFilter] = useState('');
+  const [dateFilter, setDateFilter] = useState<'all' | '6_months' | '1_year' | '2_years' | '5_years'>('all');
   const [isSearching, setIsSearching] = useState(false);
   const [results, setResults] = useState<CompanyResult[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -107,6 +109,7 @@ export default function App() {
   
   // Admin state
   const [unapprovedUsers, setUnapprovedUsers] = useState<any[]>([]);
+  const [approvedUsers, setApprovedUsers] = useState<any[]>([]);
   const [isAdminLoading, setIsAdminLoading] = useState(false);
 
   // Email Link state
@@ -197,19 +200,30 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  const fetchUnapprovedUsers = async () => {
+  const fetchAdminUsers = async () => {
     if (userData?.role !== 'admin') return;
     setIsAdminLoading(true);
     try {
-      const q = query(collection(db, 'users'), where('isApproved', '==', false));
-      const querySnapshot = await getDocs(q);
-      const users: any[] = [];
-      querySnapshot.forEach((doc) => {
-        users.push({ id: doc.id, ...doc.data() });
+      const qUnapproved = query(collection(db, 'users'), where('isApproved', '==', false));
+      const snapshotUnapproved = await getDocs(qUnapproved);
+      const unapproved: any[] = [];
+      snapshotUnapproved.forEach((doc) => {
+        unapproved.push({ id: doc.id, ...doc.data() });
       });
-      setUnapprovedUsers(users);
+      setUnapprovedUsers(unapproved);
+
+      const qApproved = query(collection(db, 'users'), where('isApproved', '==', true));
+      const snapshotApproved = await getDocs(qApproved);
+      const approved: any[] = [];
+      snapshotApproved.forEach((doc) => {
+        // Exclude current user from the list if desired, but we can just show everyone.
+        if (doc.id !== auth.currentUser?.uid) {
+          approved.push({ id: doc.id, ...doc.data() });
+        }
+      });
+      setApprovedUsers(approved);
     } catch (err) {
-      console.error("Error fetching unapproved users", err);
+      console.error("Error fetching users", err);
     } finally {
       setIsAdminLoading(false);
     }
@@ -220,15 +234,26 @@ export default function App() {
       await updateDoc(doc(db, 'users', userId), {
         isApproved: true
       });
-      setUnapprovedUsers(prev => prev.filter(u => u.id !== userId));
+      fetchAdminUsers();
     } catch (err) {
       console.error("Error approving user", err);
     }
   };
 
+  const revokeUser = async (userId: string) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), {
+        isApproved: false
+      });
+      fetchAdminUsers();
+    } catch (err) {
+      console.error("Error revoking user", err);
+    }
+  };
+
   React.useEffect(() => {
     if (activeModule === 'admin') {
-      fetchUnapprovedUsers();
+      fetchAdminUsers();
     }
   }, [activeModule, userData]);
 
@@ -312,8 +337,8 @@ export default function App() {
   const handleSearch = async (e?: React.FormEvent, searchValues?: string[]) => {
     e?.preventDefault();
     const validCompanies = searchValues || companies.filter(c => c.trim() !== '');
-    if (validCompanies.length === 0) {
-      setError('Veuillez entrer au moins un nom de société.');
+    if (validCompanies.length === 0 && !geoFilter.trim()) {
+      setError('Veuillez entrer au moins un nom de société ou une zone géographique.');
       return;
     }
 
@@ -325,28 +350,54 @@ export default function App() {
     setResults([]);
 
     try {
-      const allResults: CompanyResult[] = [];
+      let filteredResults: CompanyResult[] = [];
       const API_URL = "https://recherche-entreprises.api.gouv.fr/search";
+      
+      const geoParam = geoFilter.trim() 
+        ? (geoFilter.trim().length <= 3 ? `departement=${geoFilter.trim()}` : `code_postal=${geoFilter.trim()}`) 
+        : '';
 
-      for (const company of validCompanies) {
+      const itemsToIterate = validCompanies.length > 0 ? validCompanies : [''];
+
+      for (const company of itemsToIterate) {
         let page = 1;
         let totalPages = 1;
 
         while (page <= totalPages) {
-          if (page > 1 || allResults.length > 0) {
+          if (page > 1 || filteredResults.length > 0) {
              await new Promise(resolve => setTimeout(resolve, 300));
           }
 
-          const response = await fetch(`${API_URL}?q=${encodeURIComponent(company)}&page=${page}&per_page=25`);
+          const queryParam = company ? `q=${encodeURIComponent(company)}` : '';
+          const params = [queryParam, geoParam, `page=${page}`, `per_page=25`].filter(Boolean).join('&');
+
+          const response = await fetch(`${API_URL}?${params}`);
           if (!response.ok) throw new Error("Erreur réseau");
           
           const data = await response.json();
           if (data && data.results) {
-            const resultsWithMeta = data.results.map((r: any) => ({
+            let resultsWithMeta = data.results.map((r: any) => ({
               ...r,
-              _search_term: company
+              _search_term: company || (geoFilter.trim() ? `Zone: ${geoFilter.trim()}` : '')
             }));
-            allResults.push(...resultsWithMeta);
+            
+            // Client side date filtering
+            if (dateFilter !== 'all') {
+              const now = new Date();
+              let msFilter = 0;
+              if (dateFilter === '6_months') msFilter = 6 * 30 * 24 * 60 * 60 * 1000;
+              if (dateFilter === '1_year') msFilter = 365 * 24 * 60 * 60 * 1000;
+              if (dateFilter === '2_years') msFilter = 2 * 365 * 24 * 60 * 60 * 1000;
+              if (dateFilter === '5_years') msFilter = 5 * 365 * 24 * 60 * 60 * 1000;
+              
+              resultsWithMeta = resultsWithMeta.filter((r: any) => {
+                if (!r.date_creation) return false;
+                const creationDate = new Date(r.date_creation);
+                return (now.getTime() - creationDate.getTime()) <= msFilter;
+              });
+            }
+
+            filteredResults.push(...resultsWithMeta);
             totalPages = Math.min(data.total_pages, 5); // Limite raisonnable client-side
           } else {
             break;
@@ -355,7 +406,7 @@ export default function App() {
         }
       }
 
-      setResults(allResults);
+      setResults(filteredResults);
       setActiveTab('results');
     } catch (err) {
       console.error(err);
@@ -896,6 +947,43 @@ export default function App() {
                           <Plus className="w-4 h-4" />
                           Ajouter une autre société
                         </button>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4 pt-4 border-t border-slate-100">
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Zone géographique (Optionnel)</label>
+                            <div className="relative">
+                              <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+                                <MapPin className="w-4 h-4 text-slate-400" />
+                              </div>
+                              <input
+                                type="text"
+                                value={geoFilter}
+                                onChange={(e) => setGeoFilter(e.target.value)}
+                                placeholder="Code postal ou départ. (ex: 75, 13008)"
+                                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all placeholder:text-slate-400 text-sm"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Date de création</label>
+                            <div className="relative">
+                              <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+                                <Calendar className="w-4 h-4 text-slate-400" />
+                              </div>
+                              <select
+                                value={dateFilter}
+                                onChange={(e) => setDateFilter(e.target.value as any)}
+                                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm appearance-none"
+                              >
+                                <option value="all">Toutes dates</option>
+                                <option value="6_months">Moins de 6 mois</option>
+                                <option value="1_year">Moins d'1 an</option>
+                                <option value="2_years">Moins de 2 ans</option>
+                                <option value="5_years">Moins de 5 ans</option>
+                              </select>
+                            </div>
+                          </div>
+                        </div>
                       </div>
 
                       {error && (
@@ -1019,6 +1107,14 @@ export default function App() {
                                     )}
                                   </div>
                                 </div>
+                                {result.siege && (result.siege.adresse || result.siege.code_postal) && (
+                                  <div className="flex gap-1.5 items-start">
+                                    <MapPin className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
+                                    <div className="text-slate-600">
+                                      {[result.siege.adresse, result.siege.code_postal, result.siege.commune].filter(Boolean).join(', ')}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             </div>
                             
@@ -1391,7 +1487,7 @@ export default function App() {
                     </div>
                   </div>
                   <button 
-                    onClick={fetchUnapprovedUsers}
+                    onClick={fetchAdminUsers}
                     className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
                     title="Rafraîchir"
                   >
@@ -1413,7 +1509,7 @@ export default function App() {
                       <p className="text-slate-500 font-medium">Aucun compte en attente d'approbation pour le moment.</p>
                     </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-3 mb-8">
                       {unapprovedUsers.map(user => (
                         <div key={user.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 hover:border-slate-200 transition-colors gap-4">
                           <div className="flex flex-col">
@@ -1428,6 +1524,41 @@ export default function App() {
                           >
                             Approuver
                           </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mt-12 mb-4 pt-8 border-t border-slate-200">
+                    Comptes approuvés ({approvedUsers.length})
+                  </h3>
+                  
+                  {isAdminLoading ? (
+                    <div className="flex justify-center py-8">
+                      <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
+                    </div>
+                  ) : approvedUsers.length === 0 ? (
+                    <div className="text-center py-12 px-4 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50">
+                      <p className="text-slate-500 font-medium">Aucun compte approuvé.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {approvedUsers.map(user => (
+                        <div key={user.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-white rounded-xl border border-slate-200 hover:border-slate-300 transition-colors gap-4 shadow-sm">
+                          <div className="flex flex-col">
+                            <span className="font-bold text-slate-800 break-all">{user.email} {user.role === 'admin' && <span className="ml-2 px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">Admin</span>} {user.id === auth.currentUser?.uid && <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">Vous</span>}</span>
+                            <span className="text-sm text-slate-500">
+                              Inscription : {new Date(user.createdAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                          {user.id !== auth.currentUser?.uid && (
+                            <button
+                              onClick={() => revokeUser(user.id)}
+                              className="bg-white border border-red-200 hover:bg-red-50 text-red-600 px-4 py-2 rounded-lg font-bold transition-all min-w-[120px]"
+                            >
+                              Retirer l'accès
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>
