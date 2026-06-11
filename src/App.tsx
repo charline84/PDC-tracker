@@ -148,8 +148,11 @@ export default function App() {
               setUserData(newUserData);
             }
           }
-        } catch (err) {
+        } catch (err: any) {
           console.error("Error fetching user role", err);
+          if (err.message && err.message.includes('Missing or insufficient permissions')) {
+            setAuthError("Les règles de sécurité de votre base de données Firebase ne sont pas configurées. Allez dans Firebase Console > Firestore Database > Règles et copiez-y le contenu du fichier firestore.rules.");
+          }
           setIsAuthenticated(false);
           setNotApproved(false);
           setUserData(null);
