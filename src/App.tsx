@@ -20,12 +20,16 @@ import {
   Database,
   RefreshCw,
   Server,
-  Github
+  Github,
+  LogOut
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ExcelJS from 'exceljs';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import MapComponent from './components/MapComponent';
+import { auth, db } from './lib/firebase';
+import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
+import { doc, setDoc, getDoc, updateDoc, collection, getDocs, query, where } from 'firebase/firestore';
 
 interface CompanyResult {
   nom_complet: string;
@@ -71,7 +75,7 @@ const getNafLabel = (codeStr: string) => {
 };
 
 export default function App() {
-  const [activeModule, setActiveModule] = useState<'entreprises' | 'ads'>('entreprises');
+  const [activeModule, setActiveModule] = useState<'entreprises' | 'ads' | 'admin'>('entreprises');
   
   // Entreprises State
   const [companies, setCompanies] = useState<string[]>(['']);
@@ -96,7 +100,128 @@ export default function App() {
   const [adsViewMode, setAdsViewMode] = useState<'list' | 'map'>('list');
 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [password, setPassword] = useState('');
+  const [authChecking, setAuthChecking] = useState(true);
+  const [userData, setUserData] = useState<any>(null);
+  const [notApproved, setNotApproved] = useState(false);
+  const [authError, setAuthError] = useState('');
+  
+  // Admin state
+  const [unapprovedUsers, setUnapprovedUsers] = useState<any[]>([]);
+  const [isAdminLoading, setIsAdminLoading] = useState(false);
+
+  React.useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          const userDocRef = doc(db, 'users', user.uid);
+          const userDocSnap = await getDoc(userDocRef);
+          
+          if (userDocSnap.exists()) {
+            const data = userDocSnap.data();
+            if (!data.isApproved) {
+              setIsAuthenticated(false);
+              setNotApproved(true);
+              setUserData(null);
+            } else {
+              setIsAuthenticated(true);
+              setNotApproved(false);
+              setUserData(data);
+            }
+          } else {
+            // New user who hasn't been saved to DB yet or something strange
+            const isCharline = user.email?.toLowerCase() === 'charline.haim@gmail.com';
+            const newUserData = {
+              email: user.email?.toLowerCase() || '',
+              role: isCharline ? 'admin' : 'user',
+              isApproved: isCharline ? true : false,
+              createdAt: new Date().toISOString()
+            };
+            await setDoc(userDocRef, newUserData);
+            
+            if (!newUserData.isApproved) {
+              setIsAuthenticated(false);
+              setNotApproved(true);
+              setUserData(null);
+            } else {
+              setIsAuthenticated(true);
+              setNotApproved(false);
+              setUserData(newUserData);
+            }
+          }
+        } catch (err) {
+          console.error("Error fetching user role", err);
+          setIsAuthenticated(false);
+          setNotApproved(false);
+          setUserData(null);
+        }
+      } else {
+        setIsAuthenticated(false);
+        setNotApproved(false);
+        setUserData(null);
+      }
+      setAuthChecking(false);
+    });
+    return unsubscribe;
+  }, []);
+
+  const fetchUnapprovedUsers = async () => {
+    if (userData?.role !== 'admin') return;
+    setIsAdminLoading(true);
+    try {
+      const q = query(collection(db, 'users'), where('isApproved', '==', false));
+      const querySnapshot = await getDocs(q);
+      const users: any[] = [];
+      querySnapshot.forEach((doc) => {
+        users.push({ id: doc.id, ...doc.data() });
+      });
+      setUnapprovedUsers(users);
+    } catch (err) {
+      console.error("Error fetching unapproved users", err);
+    } finally {
+      setIsAdminLoading(false);
+    }
+  };
+
+  const approveUser = async (userId: string) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), {
+        isApproved: true
+      });
+      setUnapprovedUsers(prev => prev.filter(u => u.id !== userId));
+    } catch (err) {
+      console.error("Error approving user", err);
+    }
+  };
+
+  React.useEffect(() => {
+    if (activeModule === 'admin') {
+      fetchUnapprovedUsers();
+    }
+  }, [activeModule, userData]);
+
+  const [geoUtilQuery, setGeoUtilQuery] = useState('');
+  const [geoUtilResults, setGeoUtilResults] = useState<any[]>([]);
+  const [isSearchingGeoUtil, setIsSearchingGeoUtil] = useState(false);
+
+  const handleGeoUtilSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!geoUtilQuery.trim()) return;
+    setIsSearchingGeoUtil(true);
+    try {
+      const isPostalCode = /^\d+$/.test(geoUtilQuery.trim());
+      const url = isPostalCode 
+        ? `https://geo.api.gouv.fr/communes?codePostal=${geoUtilQuery.trim()}&fields=nom,code,codesPostaux,population`
+        : `https://geo.api.gouv.fr/communes?nom=${encodeURIComponent(geoUtilQuery.trim())}&fields=nom,code,codesPostaux,population&boost=population&limit=5`;
+        
+      const res = await fetch(url);
+      const data = await res.json();
+      setGeoUtilResults(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSearchingGeoUtil(false);
+    }
+  };
 
   const filteredAdsResults = useMemo(() => {
     return adsResults.filter(r => {
@@ -424,6 +549,32 @@ export default function App() {
     }
   };
 
+  const handleLogin = async () => {
+    setAuthError('');
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (err: any) {
+      console.error(err);
+      setAuthError(err.message || 'Erreur lors de la connexion Google');
+    }
+  };
+
+  const handleLogout = () => {
+    signOut(auth);
+  };
+
+  if (authChecking) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="flex flex-col items-center">
+          <Loader2 className="w-8 h-8 text-blue-600 animate-spin mb-4" />
+          <p className="text-slate-500 font-medium">Chargement...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
@@ -434,26 +585,52 @@ export default function App() {
               <Building2 className="text-blue-600 w-8 h-8" />
             </div>
           </div>
-          <h2 className="text-2xl font-black text-slate-800 mb-2 text-center">Accès Restreint</h2>
-          <p className="text-slate-500 text-sm text-center mb-6">Veuillez vous authentifier pour accéder à la base de données.</p>
-          <form onSubmit={(e) => {
-            e.preventDefault();
-            if (password === 'admin123' || password === 'urbanisme' || password === 'charline') setIsAuthenticated(true);
-            else alert('Mot de passe incorrect');
-          }}>
-            <input 
-              type="password" 
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-4 py-3 mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-shadow"
-              placeholder="Mot de passe"
-              autoFocus
-            />
-            <button type="submit" className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2">
-              Déverrouiller
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </form>
+          <h2 className="text-2xl font-black text-slate-800 mb-2 text-center">
+            {notApproved ? 'Compte en attente' : 'Connexion via Google'}
+          </h2>
+          <p className="text-slate-500 text-sm text-center mb-6">
+            {notApproved
+              ? "Votre compte est en cours d'examen."
+              : "Veuillez vous authentifier pour accéder à l'application."}
+          </p>
+          
+          {notApproved ? (
+            <div className="text-center">
+              <div className="bg-amber-50 text-amber-700 p-4 rounded-xl text-sm mb-6 border border-amber-200">
+                <span className="block font-bold mb-1 leading-tight">En attente d'approbation</span>
+                Votre compte a été créé avec succès mais un administrateur doit l'approuver avant que vous ne puissiez accéder à l'application.
+              </div>
+              <button 
+                onClick={() => { setNotApproved(false); handleLogout(); }}
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 px-4 rounded-lg transition-colors flex items-center justify-center"
+              >
+                Retour
+              </button>
+            </div>
+          ) : (
+            <>
+              {authError && (
+                <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4 border border-red-100">
+                  {authError}
+                </div>
+              )}
+
+              <div className="flex flex-col items-center gap-6 py-4">
+                <button 
+                  onClick={handleLogin}
+                  className="w-full bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-3 shadow-sm"
+                >
+                  <svg className="w-5 h-5" viewBox="0 0 24 24">
+                    <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                  </svg>
+                  Continuer avec Google
+                </button>
+              </div>
+          </>
+          )}
         </div>
       </div>
     );
@@ -488,34 +665,54 @@ export default function App() {
               >
                 Permis de Construire (OpenData)
               </button>
+              {userData?.role === 'admin' && (
+                <button
+                  onClick={() => setActiveModule('admin')}
+                  className={`px-4 py-2 font-medium text-sm rounded-lg transition-colors ${
+                    activeModule === 'admin' ? 'bg-purple-50 text-purple-700' : 'text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  Administration
+                </button>
+              )}
             </nav>
           </div>
           
-          {activeModule === 'entreprises' && (
-            <nav className="flex gap-1 p-1 bg-slate-100 rounded-lg">
-              <button 
-                onClick={() => setActiveTab('search')}
-                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
-                  activeTab === 'search' 
-                  ? 'bg-white text-blue-600 shadow-sm' 
-                  : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Recherche
-              </button>
-              <button 
-                onClick={() => results.length > 0 && setActiveTab('results')}
-                disabled={results.length === 0}
-                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
-                  activeTab === 'results' 
-                  ? 'bg-white text-blue-600 shadow-sm' 
-                  : results.length > 0 ? 'text-slate-600 hover:text-slate-900' : 'text-slate-300 cursor-not-allowed'
-                }`}
-              >
-                Résultats ({results.length})
-              </button>
-            </nav>
-          )}
+          <div className="flex items-center gap-4">
+            {activeModule === 'entreprises' && (
+              <nav className="flex gap-1 p-1 bg-slate-100 rounded-lg">
+                <button 
+                  onClick={() => setActiveTab('search')}
+                  className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
+                    activeTab === 'search' 
+                    ? 'bg-white text-blue-600 shadow-sm' 
+                    : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Recherche
+                </button>
+                <button 
+                  onClick={() => results.length > 0 && setActiveTab('results')}
+                  disabled={results.length === 0}
+                  className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
+                    activeTab === 'results' 
+                    ? 'bg-white text-blue-600 shadow-sm' 
+                    : results.length > 0 ? 'text-slate-600 hover:text-slate-900' : 'text-slate-300 cursor-not-allowed'
+                  }`}
+                >
+                  Résultats ({results.length})
+                </button>
+              </nav>
+            )}
+            
+            <button
+              onClick={handleLogout}
+              className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+              title="Se déconnecter"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
+          </div>
         </div>
         <div className="md:hidden flex border-t border-slate-100">
              <button
@@ -534,6 +731,16 @@ export default function App() {
               >
                 Permis
               </button>
+              {userData?.role === 'admin' && (
+                <button
+                  onClick={() => setActiveModule('admin')}
+                  className={`flex-1 py-3 font-medium text-sm transition-colors text-center ${
+                    activeModule === 'admin' ? 'border-b-2 border-purple-600 text-purple-700' : 'text-slate-600 bg-slate-50'
+                  }`}
+                >
+                  Admin
+                </button>
+              )}
         </div>
       </header>
 
@@ -810,6 +1017,47 @@ export default function App() {
                 </form>
               </div>
 
+              {/* Module Code Postal / Commune */}
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden max-w-3xl mx-auto mb-8 p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <MapPin className="w-5 h-5 text-indigo-500" />
+                  <h3 className="text-lg font-bold text-slate-800">Trouver un code postal ou une commune</h3>
+                </div>
+                <form onSubmit={handleGeoUtilSearch} className="flex gap-4">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      className="w-full pl-4 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all placeholder:text-slate-400 font-medium text-sm"
+                      placeholder="Saisissez une commune (ex: 'Saint-Etienne', 'paris') ou un code postal (ex: 75010)"
+                      value={geoUtilQuery}
+                      onChange={(e) => setGeoUtilQuery(e.target.value)}
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isSearchingGeoUtil}
+                    className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-xl font-bold shadow-md shadow-indigo-600/20 transition-all cursor-pointer flex items-center justify-center min-w-[120px]"
+                  >
+                    {isSearchingGeoUtil ? <Loader2 className="w-5 h-5 animate-spin"/> : 'Chercher'}
+                  </button>
+                </form>
+
+                {geoUtilResults.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-slate-100">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Résultats</p>
+                    <div className="flex flex-wrap gap-2">
+                      {geoUtilResults.map((geo, idx) => (
+                        <div key={idx} className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                          <span className="font-bold text-slate-700">{geo.nom}</span>
+                          <span className="text-slate-400 mx-2">•</span>
+                          <span className="text-indigo-600 font-medium">{geo.codesPostaux?.join(', ') || geo.code}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {adsResults.length > 0 && (
                 <div className="mt-8 space-y-6">
                   {/* Filtres */}
@@ -1032,6 +1280,70 @@ export default function App() {
                   )}
                 </div>
               )}
+            </motion.div>
+          )}
+          {activeModule === 'admin' && (
+            <motion.div
+              key="admin-module"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden max-w-3xl mx-auto mb-8">
+                <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-purple-100 text-purple-600 rounded-lg">
+                      <LogOut className="w-5 h-5 -scale-x-100" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold text-slate-800">Administration</h2>
+                      <p className="text-slate-500 text-sm">Gestion des utilisateurs</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={fetchUnapprovedUsers}
+                    className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                    title="Rafraîchir"
+                  >
+                    <RefreshCw className={`w-5 h-5 ${isAdminLoading ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+                
+                <div className="p-6">
+                  <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">
+                    Comptes en attente de validation ({unapprovedUsers.length})
+                  </h3>
+                  
+                  {isAdminLoading ? (
+                    <div className="flex justify-center py-8">
+                      <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
+                    </div>
+                  ) : unapprovedUsers.length === 0 ? (
+                    <div className="text-center py-12 px-4 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50">
+                      <p className="text-slate-500 font-medium">Aucun compte en attente d'approbation pour le moment.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {unapprovedUsers.map(user => (
+                        <div key={user.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 hover:border-slate-200 transition-colors gap-4">
+                          <div className="flex flex-col">
+                            <span className="font-bold text-slate-800 break-all">{user.email}</span>
+                            <span className="text-sm text-slate-500">
+                              Inscription : {new Date(user.createdAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => approveUser(user.id)}
+                            className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-bold shadow-md shadow-purple-600/20 transition-all min-w-[120px]"
+                          >
+                            Approuver
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
