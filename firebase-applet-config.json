@@ -1,10 +1,9 @@
 {
-  "projectId": "heroic-presence-771nt",
-  "appId": "1:1007905021751:web:ba018ab26c8ffb646d84b2",
-  "apiKey": "AIzaSyDH7ZEn5y5Z9fnPAG6n6Mi_t5xP0cGCXJo",
-  "authDomain": "heroic-presence-771nt.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-50e552a0-b0e1-4971-b2fc-e581c7499fd8",
-  "storageBucket": "heroic-presence-771nt.firebasestorage.app",
-  "messagingSenderId": "1007905021751",
-  "measurementId": ""
+  "apiKey": "AIzaSyAY0VzuHZ0cOA0TCKuOYo6GuY986H1bH_k",
+  "authDomain": "entreprise-tracker.firebaseapp.com",
+  "projectId": "entreprise-tracker",
+  "storageBucket": "entreprise-tracker.firebasestorage.app",
+  "messagingSenderId": "324089298249",
+  "appId": "1:324089298249:web:844e296a4fca94b7fe6e98",
+  "measurementId": "G-G9V1KGK26G"
 }
