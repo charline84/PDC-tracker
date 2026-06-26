@@ -80,7 +80,7 @@ export default function App() {
   // Entreprises State
   const [companies, setCompanies] = useState<string[]>(['']);
   const [geoFilter, setGeoFilter] = useState('');
-  const [dateFilter, setDateFilter] = useState<'all' | '6_months' | '1_year' | '2_years' | '5_years'>('all');
+  const [dateFilter, setDateFilter] = useState<'all' | '6_months' | '1_year' | '2_years' | '5_years' | 'more_5_years'>('all');
   const [isSearching, setIsSearching] = useState(false);
   const [results, setResults] = useState<CompanyResult[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -385,15 +385,21 @@ export default function App() {
             if (dateFilter !== 'all') {
               const now = new Date();
               let msFilter = 0;
+              let isMore = false;
               if (dateFilter === '6_months') msFilter = 6 * 30 * 24 * 60 * 60 * 1000;
-              if (dateFilter === '1_year') msFilter = 365 * 24 * 60 * 60 * 1000;
-              if (dateFilter === '2_years') msFilter = 2 * 365 * 24 * 60 * 60 * 1000;
-              if (dateFilter === '5_years') msFilter = 5 * 365 * 24 * 60 * 60 * 1000;
+              else if (dateFilter === '1_year') msFilter = 365 * 24 * 60 * 60 * 1000;
+              else if (dateFilter === '2_years') msFilter = 2 * 365 * 24 * 60 * 60 * 1000;
+              else if (dateFilter === '5_years') msFilter = 5 * 365 * 24 * 60 * 60 * 1000;
+              else if (dateFilter === 'more_5_years') {
+                msFilter = 5 * 365 * 24 * 60 * 60 * 1000;
+                isMore = true;
+              }
               
               resultsWithMeta = resultsWithMeta.filter((r: any) => {
                 if (!r.date_creation) return false;
                 const creationDate = new Date(r.date_creation);
-                return (now.getTime() - creationDate.getTime()) <= msFilter;
+                const diff = now.getTime() - creationDate.getTime();
+                return isMore ? diff > msFilter : diff <= msFilter;
               });
             }
 
@@ -980,6 +986,7 @@ export default function App() {
                                 <option value="1_year">Moins d'1 an</option>
                                 <option value="2_years">Moins de 2 ans</option>
                                 <option value="5_years">Moins de 5 ans</option>
+                                <option value="more_5_years">Plus de 5 ans</option>
                               </select>
                             </div>
                           </div>
@@ -1041,6 +1048,51 @@ export default function App() {
                       </button>
                     </div>
 
+                    <form onSubmit={(e) => handleSearch(e)} className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col md:flex-row gap-4 items-end">
+                      <div className="flex-1 w-full">
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Zone géographique (Optionnel)</label>
+                        <div className="relative">
+                          <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+                            <MapPin className="w-4 h-4 text-slate-400" />
+                          </div>
+                          <input
+                            type="text"
+                            value={geoFilter}
+                            onChange={(e) => setGeoFilter(e.target.value)}
+                            placeholder="Code postal ou départ. (ex: 75, 13008)"
+                            className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all placeholder:text-slate-400 text-sm"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex-1 w-full">
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Date de création</label>
+                        <div className="relative">
+                          <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+                            <Calendar className="w-4 h-4 text-slate-400" />
+                          </div>
+                          <select
+                            value={dateFilter}
+                            onChange={(e) => setDateFilter(e.target.value as any)}
+                            className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm appearance-none"
+                          >
+                            <option value="all">Toutes dates</option>
+                            <option value="6_months">Moins de 6 mois</option>
+                            <option value="1_year">Moins d'1 an</option>
+                            <option value="2_years">Moins de 2 ans</option>
+                            <option value="5_years">Moins de 5 ans</option>
+                            <option value="more_5_years">Plus de 5 ans</option>
+                          </select>
+                        </div>
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={isSearching}
+                        className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-bold transition-all h-[42px] flex items-center justify-center min-w-[120px] shadow-md shadow-blue-600/20"
+                      >
+                        {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Filtrer'}
+                      </button>
+                    </form>
+
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                       {results.map((result, idx) => (
                         <a
@@ -1068,15 +1120,16 @@ export default function App() {
                                     onClick={(e) => {
                                       e.preventDefault();
                                       e.stopPropagation();
+                                      const queryName = result.nom_complet || result.nom_raison_sociale || result.siren;
                                       setActiveModule('ads');
                                       setAdsSearchType('company');
-                                      setAdsQuery(result.siren);
-                                      triggerAdsSearch(result.siren, 'company');
+                                      setAdsQuery(queryName);
+                                      triggerAdsSearch(queryName, 'company');
                                     }}
-                                    className="text-[10px] cursor-pointer font-mono text-slate-500 bg-slate-100 hover:bg-amber-100 hover:text-amber-800 hover:border-amber-300 px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1 transition-all"
-                                    title="Chercher des permis de construire pour ce porteur"
+                                    className="text-[10px] cursor-pointer font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 hover:text-amber-800 hover:border-amber-300 px-2 py-0.5 rounded border border-amber-200 flex items-center gap-1 transition-all"
+                                    title="Chercher des permis de construire pour cette société"
                                   >
-                                    SIREN: {result.siren}
+                                    Rechercher Permis
                                     <HardHat className="w-3 h-3" />
                                   </button>
                                   <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${
@@ -1120,7 +1173,23 @@ export default function App() {
                             
                             <div className="mt-4 pt-4 border-t border-slate-50 flex items-center justify-between text-[10px] text-slate-400 relative z-10">
                               <span>Source: "{result._search_term}"</span>
-                              <span className="flex items-center gap-1 group-hover:text-blue-600">Voir sur Pappers <ArrowRight className="w-3 h-3" /></span>
+                              <div className="flex gap-3">
+                                <button
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    const queryName = result.nom_complet || result.nom_raison_sociale || result.siren;
+                                    setActiveModule('ads');
+                                    setAdsSearchType('company');
+                                    setAdsQuery(queryName);
+                                    triggerAdsSearch(queryName, 'company');
+                                  }}
+                                  className="flex items-center gap-1 hover:text-amber-600 transition-colors font-semibold"
+                                >
+                                  Voir les permis <HardHat className="w-3 h-3" />
+                                </button>
+                                <span className="flex items-center gap-1 group-hover:text-blue-600">Voir sur Pappers <ArrowRight className="w-3 h-3" /></span>
+                              </div>
                             </div>
                           </motion.div>
                         </a>
