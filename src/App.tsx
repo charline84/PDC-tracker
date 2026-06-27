@@ -21,7 +21,11 @@ import {
   RefreshCw,
   Server,
   Github,
-  LogOut
+  LogOut,
+  Users,
+  ArrowLeft,
+  Filter,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ExcelJS from 'exceljs';
@@ -74,6 +78,298 @@ const getNafLabel = (codeStr: string) => {
   return codeStr;
 };
 
+interface Partner {
+  id: string;
+  name: string;
+  count: number;
+  type: 'person' | 'company';
+  originalData: any;
+}
+
+const PartnerAnalysis = ({ company, results, onClose, onViewAds }: { company: CompanyResult, results: CompanyResult[], onClose: () => void, onViewAds: (queryName: string) => void }) => {
+  const [partners, setPartners] = React.useState<Partner[]>([]);
+  const [selectedPartnerIds, setSelectedPartnerIds] = React.useState<string[]>([]);
+  const [investedCompanies, setInvestedCompanies] = React.useState<CompanyResult[]>([]);
+  const [isLoadingPartners, setIsLoadingPartners] = React.useState(true);
+  const [isLoadingCompanies, setIsLoadingCompanies] = React.useState(false);
+  const [partnerFilter, setPartnerFilter] = React.useState('');
+
+  React.useEffect(() => {
+    const fetchPartners = async () => {
+      setIsLoadingPartners(true);
+      const uniquePartners = new globalThis.Map<string, Partner>();
+      
+      for (const comp of results) {
+        for (const d of (comp.dirigeants || [])) {
+          const name = d.nom ? `${d.prenoms || ''} ${d.nom}`.trim() : (d.denomination || '');
+          if (!name) continue;
+          const id = name.toLowerCase();
+          if (!uniquePartners.has(id)) {
+            uniquePartners.set(id, {
+              id,
+              name,
+              count: 0,
+              type: d.nom ? 'person' : 'company',
+              originalData: d
+            });
+          }
+        }
+      }
+
+      const partnerList = Array.from(uniquePartners.values());
+      
+      await Promise.all(partnerList.map(async (p) => {
+        try {
+          let url = '';
+          if (p.type === 'person') {
+            const nom = p.originalData.nom || '';
+            const prenoms = p.originalData.prenoms ? p.originalData.prenoms.split(' ')[0] : '';
+            url = `https://recherche-entreprises.api.gouv.fr/search?nom_dirigeant=${encodeURIComponent(nom)}&prenoms_dirigeant=${encodeURIComponent(prenoms)}&per_page=1`;
+          } else {
+            url = `https://recherche-entreprises.api.gouv.fr/search?q=${encodeURIComponent(p.name)}&per_page=1`;
+          }
+          const res = await fetch(url);
+          const data = await res.json();
+          p.count = data.total_results || 0;
+        } catch (e) {
+          console.error(e);
+        }
+      }));
+
+      setPartners(partnerList.sort((a, b) => b.count - a.count));
+      setIsLoadingPartners(false);
+    };
+    fetchPartners();
+  }, [results]);
+
+  React.useEffect(() => {
+    const fetchCompanies = async () => {
+      if (selectedPartnerIds.length === 0) {
+        setInvestedCompanies([]);
+        return;
+      }
+
+      setIsLoadingCompanies(true);
+      
+      const selectedPartners = partners.filter(p => selectedPartnerIds.includes(p.id));
+      const smallestPartner = selectedPartners.reduce((min, p) => p.count < min.count ? p : min, selectedPartners[0]);
+
+      try {
+        let url = '';
+        if (smallestPartner.type === 'person') {
+          const nom = smallestPartner.originalData.nom || '';
+          const prenoms = smallestPartner.originalData.prenoms ? smallestPartner.originalData.prenoms.split(' ')[0] : '';
+          url = `https://recherche-entreprises.api.gouv.fr/search?nom_dirigeant=${encodeURIComponent(nom)}&prenoms_dirigeant=${encodeURIComponent(prenoms)}&per_page=25`;
+        } else {
+          url = `https://recherche-entreprises.api.gouv.fr/search?q=${encodeURIComponent(smallestPartner.name)}&per_page=25`;
+        }
+
+        const allResults: any[] = [];
+        for (let page = 1; page <= 4; page++) {
+           const res = await fetch(`${url}&page=${page}`);
+           const data = await res.json();
+           if (data && data.results) {
+             allResults.push(...data.results);
+             if (page >= data.total_pages) break;
+           } else {
+             break;
+           }
+        }
+
+        const intersected = allResults.filter(c => {
+           const companyDirigeants = (c.dirigeants || []).map((d: any) => {
+             const n = d.nom ? `${d.prenoms || ''} ${d.nom}`.trim() : (d.denomination || '');
+             return n.toLowerCase();
+           });
+
+           return selectedPartnerIds.every(id => companyDirigeants.includes(id));
+        });
+
+        setInvestedCompanies(intersected);
+      } catch (e) {
+         console.error(e);
+      } finally {
+        setIsLoadingCompanies(false);
+      }
+    };
+
+    fetchCompanies();
+  }, [selectedPartnerIds, partners]);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-50 flex flex-col">
+       <div className="h-16 bg-white border-b border-slate-200 flex items-center px-4 justify-between flex-shrink-0">
+          <div className="flex items-center gap-4">
+             <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+               <ArrowLeft className="w-5 h-5 text-slate-600" />
+             </button>
+             <h2 className="font-bold text-lg text-slate-900">Analyse des associés : {company.nom_complet || company.nom_raison_sociale}</h2>
+          </div>
+       </div>
+
+       <div className="flex-1 flex overflow-hidden">
+          <div className="w-80 border-r border-slate-200 bg-white flex flex-col flex-shrink-0">
+             <div className="p-4 border-b border-slate-100">
+                <div className="flex items-center gap-2 text-sm font-bold text-slate-700 mb-3">
+                   <Filter className="w-4 h-4 text-blue-500" />
+                   INVESTISSEURS (COL C)
+                </div>
+                <div className="relative mb-3">
+                   <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                   <input 
+                     type="text"
+                     placeholder="Filtrer la liste..."
+                     value={partnerFilter}
+                     onChange={e => setPartnerFilter(e.target.value)}
+                     className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                   />
+                </div>
+                {selectedPartnerIds.length > 0 && (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex flex-wrap gap-2">
+                       {selectedPartnerIds.map(id => {
+                          const p = partners.find(p => p.id === id);
+                          return (
+                            <div key={id} className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded flex items-center gap-1 border border-blue-200">
+                               {p?.name}
+                               <button onClick={() => setSelectedPartnerIds(prev => prev.filter(x => x !== id))}>
+                                 <X className="w-3 h-3 hover:text-blue-900" />
+                               </button>
+                            </div>
+                          );
+                       })}
+                    </div>
+                    <button onClick={() => setSelectedPartnerIds([])} className="text-xs text-slate-500 hover:text-slate-800 self-start underline font-medium">
+                      Tout effacer
+                    </button>
+                  </div>
+                )}
+             </div>
+             
+             <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                {isLoadingPartners ? (
+                   <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-blue-500" /></div>
+                ) : (
+                   partners.filter(p => p.name.toLowerCase().includes(partnerFilter.toLowerCase())).map(p => {
+                      const isSelected = selectedPartnerIds.includes(p.id);
+                      return (
+                        <button
+                          key={p.id}
+                          onClick={() => {
+                             setSelectedPartnerIds(prev => 
+                               isSelected ? prev.filter(x => x !== p.id) : [...prev, p.id]
+                             );
+                          }}
+                          className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                            isSelected ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20' : 'hover:bg-slate-50 text-slate-700'
+                          }`}
+                        >
+                           <span className="truncate pr-2 text-left">{p.name}</span>
+                           <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                             isSelected ? 'bg-blue-500/50 text-white' : 'bg-slate-100 text-slate-500'
+                           }`}>
+                             {p.count}
+                           </span>
+                        </button>
+                      )
+                   })
+                )}
+             </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
+             <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6 flex justify-between items-center shadow-sm">
+                <div>
+                  <h3 className="text-2xl font-bold text-slate-900 flex items-center gap-3">
+                    Sociétés Investies
+                    <span className="text-xs font-medium px-2 py-1 bg-slate-100 text-slate-500 rounded border border-slate-200">Colonne A</span>
+                  </h3>
+                  <p className="text-slate-500 text-sm mt-1">Affichage des sociétés où tous les investisseurs sélectionnés sont présents simultanément.</p>
+                </div>
+                <div className="text-right">
+                  <div className="text-4xl font-black text-blue-600 leading-none">{investedCompanies.length}</div>
+                  <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mt-1">Résultats</div>
+                </div>
+             </div>
+
+             {isLoadingCompanies ? (
+                <div className="flex justify-center p-12"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>
+             ) : selectedPartnerIds.length === 0 ? (
+                <div className="text-center p-12 border-2 border-dashed border-slate-200 rounded-xl bg-white text-slate-500 font-medium">
+                  Sélectionnez un ou plusieurs investisseurs pour voir les sociétés investies.
+                </div>
+             ) : (
+                <div className="space-y-4">
+                   {investedCompanies.map((comp, idx) => (
+                      <div key={idx} className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-md transition-shadow">
+                         <div className="flex justify-between items-start mb-4">
+                            <div>
+                               <div className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded inline-block mb-2 uppercase tracking-wider">
+                                 Nom de la société
+                               </div>
+                               <h4 className="text-xl font-black text-slate-900 mb-2">{comp.nom_complet || comp.nom_raison_sociale}</h4>
+                               {comp.siege && (comp.siege.adresse || comp.siege.code_postal) && (
+                                 <div className="flex items-center gap-1.5 text-sm text-slate-500 font-medium">
+                                   <MapPin className="w-4 h-4 text-slate-400" />
+                                   {[comp.siege.adresse, comp.siege.code_postal, comp.siege.commune].filter(Boolean).join(', ')}
+                                 </div>
+                               )}
+                            </div>
+                            {comp.siege?.etat_administratif && (
+                               <span className={`px-3 py-1 rounded text-xs font-bold ${
+                                 comp.siege.etat_administratif === 'A' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
+                               }`}>
+                                 {comp.siege.etat_administratif === 'A' ? 'Active' : 'Fermée'}
+                               </span>
+                            )}
+                         </div>
+
+                         <div className="pt-4 border-t border-slate-100">
+                            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
+                               <Users className="w-4 h-4" />
+                               Dirigeants / Partenaires
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                               {(comp.dirigeants || []).map((d: any, didx: number) => {
+                                  const name = d.nom ? `${d.prenoms || ''} ${d.nom}`.trim() : (d.denomination || '');
+                                  if (!name) return null;
+                                  const id = name.toLowerCase();
+                                  const isSelected = selectedPartnerIds.includes(id);
+                                  return (
+                                    <span key={didx} className={`text-xs font-bold px-3 py-1.5 rounded border ${
+                                      isSelected 
+                                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
+                                      : 'bg-white text-slate-600 border-slate-200'
+                                    }`}>
+                                      {name}
+                                    </span>
+                                  )
+                               })}
+                            </div>
+                         </div>
+                         
+                         <div className="mt-4 pt-4 border-t border-slate-100 flex justify-end">
+                            <button
+                              onClick={() => {
+                                const queryName = comp.nom_complet || comp.nom_raison_sociale || comp.siren;
+                                onViewAds(queryName);
+                              }}
+                              className="text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 px-4 py-2 rounded border border-amber-200 flex items-center gap-2 transition-all shadow-sm"
+                            >
+                               Voir les permis
+                               <HardHat className="w-4 h-4" />
+                            </button>
+                         </div>
+                      </div>
+                   ))}
+                </div>
+             )}
+          </div>
+       </div>
+    </div>
+  );
+};
+
 export default function App() {
   const [activeModule, setActiveModule] = useState<'entreprises' | 'ads' | 'admin'>('entreprises');
   
@@ -85,6 +381,7 @@ export default function App() {
   const [results, setResults] = useState<CompanyResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'search' | 'results'>('search');
+  const [analyzedCompany, setAnalyzedCompany] = useState<CompanyResult | null>(null);
 
   // ADS State
   const [adsSearchType, setAdsSearchType] = useState<'company' | 'permit' | 'geo'>('geo');
@@ -1168,12 +1465,33 @@ export default function App() {
                                     </div>
                                   </div>
                                 )}
+                                {result.dirigeants && result.dirigeants.length > 0 && (
+                                  <div className="flex gap-1.5 items-start mt-1">
+                                    <Users className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
+                                    <div className="text-slate-600">
+                                      <span className="font-semibold text-slate-700">Associé(s) : </span>
+                                      {result.dirigeants.map(d => d.nom ? `${d.prenoms || ''} ${d.nom}` : (d.denomination || 'Non renseigné')).join(', ')}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             </div>
                             
                             <div className="mt-4 pt-4 border-t border-slate-50 flex items-center justify-between text-[10px] text-slate-400 relative z-10">
                               <span>Source: "{result._search_term}"</span>
                               <div className="flex gap-3">
+                                {result.dirigeants && result.dirigeants.length > 0 && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      setAnalyzedCompany(result);
+                                    }}
+                                    className="flex items-center gap-1 hover:text-blue-600 transition-colors font-semibold"
+                                  >
+                                    Analyse des associés <Users className="w-3 h-3" />
+                                  </button>
+                                )}
                                 <button
                                   onClick={(e) => {
                                     e.preventDefault();
@@ -1639,6 +1957,21 @@ export default function App() {
         </AnimatePresence>
       </main>
       
+      {analyzedCompany && (
+        <PartnerAnalysis 
+          company={analyzedCompany}
+          results={results}
+          onClose={() => setAnalyzedCompany(null)} 
+          onViewAds={(queryName) => {
+            setAnalyzedCompany(null);
+            setActiveModule('ads');
+            setAdsSearchType('company');
+            setAdsQuery(queryName);
+            triggerAdsSearch(queryName, 'company');
+          }}
+        />
+      )}
+
       <footer className="max-w-5xl mx-auto px-4 py-8 text-center border-t border-slate-200 mt-12 bg-white flex flex-col sm:flex-row items-center justify-between">
         <p className="text-slate-500 text-sm">&copy; {new Date().getFullYear()} Développement commercial.</p>
         <div className="flex gap-4 mt-4 sm:mt-0 text-xs text-slate-400 font-medium items-center">
