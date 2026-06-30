@@ -25,7 +25,8 @@ import {
   Users,
   ArrowLeft,
   Filter,
-  X
+  X,
+  Star
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ExcelJS from 'exceljs';
@@ -33,7 +34,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis
 import MapComponent from './components/MapComponent';
 import { auth, db } from './lib/firebase';
 import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink } from 'firebase/auth';
-import { doc, setDoc, getDoc, updateDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, collection, getDocs, query, where, deleteDoc } from 'firebase/firestore';
 
 interface CompanyResult {
   nom_complet: string;
@@ -86,9 +87,15 @@ interface Partner {
   originalData: any;
 }
 
-const PartnerAnalysis = ({ company, results, onClose, onViewAds }: { company: CompanyResult, results: CompanyResult[], onClose: () => void, onViewAds: (queryName: string) => void }) => {
+const PartnerAnalysis = ({ results, onClose, onViewAds }: { results: CompanyResult[], onClose: () => void, onViewAds: (queryName: string) => void }) => {
   const [selectedPartnerIds, setSelectedPartnerIds] = React.useState<string[]>([]);
   const [partnerFilter, setPartnerFilter] = React.useState('');
+
+  const togglePartner = (id: string) => {
+    setSelectedPartnerIds(prev => 
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
 
   const partners = React.useMemo(() => {
     const uniquePartners = new globalThis.Map<string, Partner>();
@@ -135,7 +142,7 @@ const PartnerAnalysis = ({ company, results, onClose, onViewAds }: { company: Co
              <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
                <ArrowLeft className="w-5 h-5 text-slate-600" />
              </button>
-             <h2 className="font-bold text-lg text-slate-900">Analyse des associés : {company.nom_complet || company.nom_raison_sociale}</h2>
+             <h2 className="font-bold text-lg text-slate-900">Analyse des associés ({results.length} résultats)</h2>
           </div>
        </div>
 
@@ -226,7 +233,7 @@ const PartnerAnalysis = ({ company, results, onClose, onViewAds }: { company: Co
              ) : (
                 <div className="space-y-4">
                    {investedCompanies.map((comp, idx) => (
-                      <div key={idx} className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-md transition-shadow">
+                      <div key={idx} className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-md transition-shadow flex flex-col">
                          <div className="flex justify-between items-start mb-4">
                             <div>
                                <div className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded inline-block mb-2 uppercase tracking-wider">
@@ -240,16 +247,23 @@ const PartnerAnalysis = ({ company, results, onClose, onViewAds }: { company: Co
                                  </div>
                                )}
                             </div>
-                            {comp.siege?.etat_administratif && (
-                               <span className={`px-3 py-1 rounded text-xs font-bold ${
-                                 comp.siege.etat_administratif === 'A' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
-                               }`}>
-                                 {comp.siege.etat_administratif === 'A' ? 'Active' : 'Fermée'}
-                               </span>
-                            )}
+                            <div className="flex flex-col items-end gap-2">
+                               {comp.siege?.etat_administratif && (
+                                  <span className={`px-3 py-1 rounded text-xs font-bold ${
+                                    comp.siege.etat_administratif === 'A' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
+                                  }`}>
+                                    {comp.siege.etat_administratif === 'A' ? 'Active' : 'Fermée'}
+                                  </span>
+                               )}
+                               {comp.date_creation && (
+                                  <span className="text-xs text-slate-500 font-medium">
+                                    Créée le {new Date(comp.date_creation).toLocaleDateString()}
+                                  </span>
+                               )}
+                            </div>
                          </div>
 
-                         <div className="pt-4 border-t border-slate-100">
+                         <div className="pt-4 border-t border-slate-100 flex-1">
                             <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
                                <Users className="w-4 h-4" />
                                Dirigeants / Partenaires
@@ -261,19 +275,30 @@ const PartnerAnalysis = ({ company, results, onClose, onViewAds }: { company: Co
                                   const id = name.toLowerCase();
                                   const isSelected = selectedPartnerIds.includes(id);
                                   return (
-                                    <span key={didx} className={`text-xs font-bold px-3 py-1.5 rounded border ${
+                                    <button 
+                                      key={didx} 
+                                      onClick={() => togglePartner(id)}
+                                      className={`text-xs font-bold px-3 py-1.5 rounded border transition-colors ${
                                       isSelected 
-                                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
-                                      : 'bg-white text-slate-600 border-slate-200'
+                                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm hover:bg-blue-700' 
+                                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:border-slate-300'
                                     }`}>
                                       {name}
-                                    </span>
+                                    </button>
                                   )
                                })}
                             </div>
                          </div>
                          
-                         <div className="mt-4 pt-4 border-t border-slate-100 flex justify-end">
+                         <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
+                            <a 
+                              href={`https://www.pappers.fr/entreprise/${comp.siren}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm font-bold text-slate-600 hover:text-blue-600 transition-colors flex items-center gap-1"
+                            >
+                              Voir sur Pappers <ArrowRight className="w-3 h-3" />
+                            </a>
                             <button
                               onClick={() => {
                                 const queryName = comp.nom_complet || comp.nom_raison_sociale || comp.siren;
@@ -306,7 +331,27 @@ export default function App() {
   const [results, setResults] = useState<CompanyResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'search' | 'results'>('search');
-  const [analyzedCompany, setAnalyzedCompany] = useState<CompanyResult | null>(null);
+  const [showPartnerAnalysis, setShowPartnerAnalysis] = useState(false);
+  const [savedSearches, setSavedSearches] = useState<{name: string, q: string[], geoFilter: string, dateFilter: string}[]>(() => {
+    try {
+      const saved = localStorage.getItem('savedSearches');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('savedSearches', JSON.stringify(savedSearches));
+  }, [savedSearches]);
+
+  const isCurrentSearchSaved = React.useMemo(() => {
+    return savedSearches.some(s => 
+      JSON.stringify(s.q) === JSON.stringify(companies) &&
+      s.geoFilter === geoFilter &&
+      s.dateFilter === dateFilter
+    );
+  }, [savedSearches, companies, geoFilter, dateFilter]);
 
   // ADS State
   const [adsSearchType, setAdsSearchType] = useState<'company' | 'permit' | 'geo'>('geo');
@@ -459,6 +504,15 @@ export default function App() {
       fetchAdminUsers();
     } catch (err) {
       console.error("Error approving user", err);
+    }
+  };
+
+  const rejectUser = async (userId: string) => {
+    try {
+      await deleteDoc(doc(db, 'users', userId));
+      fetchAdminUsers();
+    } catch (err) {
+      console.error("Error rejecting user", err);
     }
   };
 
@@ -1010,12 +1064,18 @@ export default function App() {
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2">
+            <button 
+              onClick={() => {
+                setActiveModule('entreprises');
+                setActiveTab('search');
+              }}
+              className="flex items-center gap-2 hover:opacity-80 transition-opacity text-left"
+            >
               <div className="bg-blue-600 p-2 rounded-lg">
                 <Building2 className="text-white w-5 h-5" />
               </div>
               <h1 className="text-xl font-bold tracking-tight text-slate-800 hidden sm:block">Développement commercial</h1>
-            </div>
+            </button>
 
             <nav className="hidden md:flex gap-1">
               <button
@@ -1247,6 +1307,54 @@ export default function App() {
                         </button>
                       </div>
                     </form>
+
+                    <div className="mt-8">
+                      <div className="flex items-center gap-2 mb-4">
+                        <Star className="w-5 h-5 text-amber-500" />
+                        <h3 className="text-lg font-bold text-slate-800">Recherches favorites</h3>
+                      </div>
+                      
+                      {savedSearches.length === 0 ? (
+                        <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl p-8 text-center text-slate-500">
+                          Aucune recherche favorite pour le moment. Lancez une recherche puis cliquez sur l'étoile pour la sauvegarder.
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {savedSearches.map((search, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => {
+                                setCompanies(search.q);
+                                setGeoFilter(search.geoFilter);
+                                setDateFilter(search.dateFilter as any);
+                                handleSearch(undefined, search.q);
+                              }}
+                              className="text-left bg-white p-4 rounded-xl border border-slate-200 hover:border-amber-400 hover:shadow-md transition-all group relative"
+                            >
+                              <div className="flex justify-between items-start mb-2">
+                                <h4 className="font-bold text-slate-900 group-hover:text-amber-700 transition-colors pr-6">{search.name}</h4>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSavedSearches(prev => prev.filter((_, i) => i !== idx));
+                                  }}
+                                  className="absolute top-4 right-4 text-slate-400 hover:text-red-500 transition-colors"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {search.q.map((c, i) => (
+                                  <span key={i} className="text-[10px] font-bold px-2 py-1 bg-slate-100 text-slate-600 rounded">
+                                    {c}
+                                  </span>
+                                ))}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </motion.div>
                 ) : (
                   <motion.div 
@@ -1257,17 +1365,78 @@ export default function App() {
                     className="space-y-6"
                   >
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div>
-                        <h2 className="text-2xl font-bold text-slate-900">Résultats de la recherche</h2>
-                        <p className="text-slate-500">{results.length} entreprises identifiées</p>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setActiveTab('search')}
+                          className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                        >
+                          <ArrowLeft className="w-5 h-5 text-slate-600" />
+                        </button>
+                        <div>
+                          <div className="flex items-center gap-3">
+                            <h2 className="text-2xl font-bold text-slate-900">Résultats de la recherche</h2>
+                            <button
+                              onClick={() => {
+                                if (isCurrentSearchSaved) {
+                                  // Find and remove the matching search
+                                  setSavedSearches(prev => prev.filter(s => 
+                                    !(JSON.stringify(s.q) === JSON.stringify(companies) &&
+                                      s.geoFilter === geoFilter &&
+                                      s.dateFilter === dateFilter)
+                                  ));
+                                } else {
+                                  const terms = companies.filter(c => c);
+                                  let searchName = terms.join(', ');
+                                  if (geoFilter) {
+                                    searchName += (searchName ? ' - ' : '') + geoFilter;
+                                  }
+                                  if (!searchName) {
+                                    searchName = 'Recherche du ' + new Date().toLocaleDateString();
+                                  }
+                                  
+                                  let finalName = searchName;
+                                  let counter = 1;
+                                  while(savedSearches.some(s => s.name === finalName)) {
+                                    finalName = `${searchName} (${counter})`;
+                                    counter++;
+                                  }
+                                  
+                                  setSavedSearches(prev => [...prev, {
+                                    name: finalName,
+                                    q: companies,
+                                    geoFilter,
+                                    dateFilter
+                                  }]);
+                                }
+                              }}
+                              className={`p-1 rounded-md transition-colors flex items-center justify-center group relative ${isCurrentSearchSaved ? 'text-amber-500 hover:text-slate-400 hover:bg-slate-50' : 'text-slate-400 hover:text-amber-500 hover:bg-amber-50'}`}
+                              title={isCurrentSearchSaved ? "Retirer des favoris" : "Sauvegarder la recherche"}
+                            >
+                              <Star className={`w-5 h-5 ${isCurrentSearchSaved ? 'fill-amber-500 text-amber-500' : ''}`} />
+                              <span className="absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap bg-slate-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+                                {isCurrentSearchSaved ? 'Retirer des favoris' : 'Sauvegarder'}
+                              </span>
+                            </button>
+                          </div>
+                          <p className="text-slate-500">{results.length} entreprises identifiées</p>
+                        </div>
                       </div>
-                      <button
-                        onClick={handleExport}
-                        className="flex items-center justify-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
-                      >
-                        <Download className="w-5 h-5" />
-                        Télécharger Excel
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setShowPartnerAnalysis(true)}
+                          className="flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-600/20 transition-all cursor-pointer"
+                        >
+                          <Users className="w-5 h-5" />
+                          Analyse des associés
+                        </button>
+                        <button
+                          onClick={handleExport}
+                          className="flex items-center justify-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
+                        >
+                          <Download className="w-5 h-5" />
+                          Exporter
+                        </button>
+                      </div>
                     </div>
 
                     <form onSubmit={(e) => handleSearch(e)} className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col md:flex-row gap-4 items-end">
@@ -1399,18 +1568,6 @@ export default function App() {
                             <div className="mt-4 pt-4 border-t border-slate-50 flex items-center justify-between text-[10px] text-slate-400 relative z-10">
                               <span>Source: "{result._search_term}"</span>
                               <div className="flex gap-3">
-                                {result.dirigeants && result.dirigeants.length > 0 && (
-                                  <button
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      setAnalyzedCompany(result);
-                                    }}
-                                    className="flex items-center gap-1 hover:text-blue-600 transition-colors font-semibold"
-                                  >
-                                    Analyse des associés <Users className="w-3 h-3" />
-                                  </button>
-                                )}
                                 <button
                                   onClick={(e) => {
                                     e.preventDefault();
@@ -1832,12 +1989,20 @@ export default function App() {
                               Inscription : {new Date(user.createdAt).toLocaleDateString()}
                             </span>
                           </div>
-                          <button
-                            onClick={() => approveUser(user.id)}
-                            className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-bold shadow-md shadow-purple-600/20 transition-all min-w-[120px]"
-                          >
-                            Approuver
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => rejectUser(user.id)}
+                              className="bg-white border border-slate-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 text-slate-600 px-4 py-2 rounded-lg font-bold transition-all min-w-[120px]"
+                            >
+                              Rejeter
+                            </button>
+                            <button
+                              onClick={() => approveUser(user.id)}
+                              className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-bold shadow-md shadow-purple-600/20 transition-all min-w-[120px]"
+                            >
+                              Approuver
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1884,13 +2049,12 @@ export default function App() {
         </AnimatePresence>
       </main>
       
-      {analyzedCompany && (
+      {showPartnerAnalysis && (
         <PartnerAnalysis 
-          company={analyzedCompany}
           results={results}
-          onClose={() => setAnalyzedCompany(null)} 
+          onClose={() => setShowPartnerAnalysis(false)} 
           onViewAds={(queryName) => {
-            setAnalyzedCompany(null);
+            setShowPartnerAnalysis(false);
             setActiveModule('ads');
             setAdsSearchType('company');
             setAdsQuery(queryName);
