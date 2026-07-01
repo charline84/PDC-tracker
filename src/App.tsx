@@ -1275,9 +1275,9 @@ export default function App() {
                           Ajouter une autre société
                         </button>
                         
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-100">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-4 pt-4 border-t border-slate-100">
                           <div>
-                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Zone géographique (Optionnel)</label>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 truncate" title="Zone géographique">Zone géographique</label>
                             <div className="relative">
                               <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
                                 <MapPin className="w-4 h-4 text-slate-400" />
@@ -1286,13 +1286,13 @@ export default function App() {
                                 type="text"
                                 value={geoFilter}
                                 onChange={(e) => setGeoFilter(e.target.value)}
-                                placeholder="Code postal ou départ. (ex: 75, 13008)"
-                                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all placeholder:text-slate-400 text-sm"
+                                placeholder="Code postal ou départ."
+                                className="w-full pl-9 pr-3 h-[38px] bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all placeholder:text-slate-400 text-sm"
                               />
                             </div>
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Date de création</label>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 truncate" title="Date de création">Date de création</label>
                             <div className="relative">
                               <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
                                 <Calendar className="w-4 h-4 text-slate-400" />
@@ -1300,7 +1300,7 @@ export default function App() {
                               <select
                                 value={dateFilter}
                                 onChange={(e) => setDateFilter(e.target.value as any)}
-                                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm appearance-none"
+                                className="w-full pl-9 pr-3 h-[38px] bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm appearance-none"
                               >
                                 <option value="all">Toutes dates</option>
                                 <option value="6_months">Moins de 6 mois</option>
@@ -1312,35 +1312,35 @@ export default function App() {
                             </div>
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Statut</label>
-                            <div className="flex items-center gap-3 h-[38px] px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm">
-                              <label className="flex items-center gap-2 cursor-pointer">
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 truncate" title="Statut">Statut</label>
+                            <div className="flex items-center justify-between gap-1 h-[38px] px-2 bg-slate-50 border border-slate-200 rounded-lg text-sm">
+                              <label className="flex items-center gap-1.5 cursor-pointer">
                                 <input 
                                   type="checkbox" 
                                   checked={statusFilter.active}
                                   onChange={(e) => setStatusFilter(prev => ({...prev, active: e.target.checked}))}
                                   className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" 
                                 />
-                                <span className="font-medium text-slate-700">Active</span>
+                                <span className="font-medium text-slate-700 text-xs sm:text-sm">Active</span>
                               </label>
-                              <label className="flex items-center gap-2 cursor-pointer">
+                              <label className="flex items-center gap-1.5 cursor-pointer">
                                 <input 
                                   type="checkbox" 
                                   checked={statusFilter.closed}
                                   onChange={(e) => setStatusFilter(prev => ({...prev, closed: e.target.checked}))}
                                   className="w-4 h-4 text-red-600 rounded focus:ring-blue-500" 
                                 />
-                                <span className="font-medium text-slate-700">Fermée</span>
+                                <span className="font-medium text-slate-700 text-xs sm:text-sm">Fermée</span>
                               </label>
                             </div>
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Trier par</label>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 truncate" title="Trier par">Trier par</label>
                             <div className="relative">
                               <select
                                 value={sortOption}
                                 onChange={(e) => setSortOption(e.target.value as any)}
-                                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm appearance-none"
+                                className="w-full px-3 h-[38px] bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm appearance-none"
                               >
                                 <option value="relevance">Pertinence</option>
                                 <option value="alphabetical">Alphabétique</option>
@@ -1572,9 +1572,9 @@ export default function App() {
                       </div>
                     </div>
 
-                    <form onSubmit={(e) => handleSearch(e)} className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col md:flex-row gap-4 items-end flex-wrap">
-                      <div className="flex-1 w-full min-w-[200px]">
-                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Zone géographique</label>
+                    <form onSubmit={(e) => handleSearch(e)} className="bg-white p-4 rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 truncate" title="Zone géographique">Zone géographique</label>
                         <div className="relative">
                           <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
                             <MapPin className="w-4 h-4 text-slate-400" />
@@ -1583,13 +1583,13 @@ export default function App() {
                             type="text"
                             value={geoFilter}
                             onChange={(e) => setGeoFilter(e.target.value)}
-                            placeholder="Code postal ou départ. (ex: 75, 13008)"
-                            className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all placeholder:text-slate-400 text-sm"
+                            placeholder="Code postal ou départ."
+                            className="w-full pl-9 pr-3 h-[38px] bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all placeholder:text-slate-400 text-sm"
                           />
                         </div>
                       </div>
-                      <div className="flex-1 w-full min-w-[150px]">
-                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Date de création</label>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 truncate" title="Date de création">Date de création</label>
                         <div className="relative">
                           <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
                             <Calendar className="w-4 h-4 text-slate-400" />
@@ -1597,7 +1597,7 @@ export default function App() {
                           <select
                             value={dateFilter}
                             onChange={(e) => setDateFilter(e.target.value as any)}
-                            className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm appearance-none"
+                            className="w-full pl-9 pr-3 h-[38px] bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm appearance-none"
                           >
                             <option value="all">Toutes dates</option>
                             <option value="6_months">Moins de 6 mois</option>
@@ -1608,36 +1608,36 @@ export default function App() {
                           </select>
                         </div>
                       </div>
-                      <div className="flex-1 w-full min-w-[160px]">
-                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Statut</label>
-                        <div className="flex items-center gap-3 h-[38px] px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm">
-                          <label className="flex items-center gap-2 cursor-pointer">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 truncate" title="Statut">Statut</label>
+                        <div className="flex items-center justify-between gap-1 h-[38px] px-2 bg-slate-50 border border-slate-200 rounded-lg text-sm">
+                          <label className="flex items-center gap-1.5 cursor-pointer">
                             <input 
                               type="checkbox" 
                               checked={statusFilter.active}
                               onChange={(e) => setStatusFilter(prev => ({...prev, active: e.target.checked}))}
                               className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" 
                             />
-                            <span className="font-medium text-slate-700">Active</span>
+                            <span className="font-medium text-slate-700 text-xs sm:text-sm">Active</span>
                           </label>
-                          <label className="flex items-center gap-2 cursor-pointer">
+                          <label className="flex items-center gap-1.5 cursor-pointer">
                             <input 
                               type="checkbox" 
                               checked={statusFilter.closed}
                               onChange={(e) => setStatusFilter(prev => ({...prev, closed: e.target.checked}))}
                               className="w-4 h-4 text-red-600 rounded focus:ring-blue-500" 
                             />
-                            <span className="font-medium text-slate-700">Fermée</span>
+                            <span className="font-medium text-slate-700 text-xs sm:text-sm">Fermée</span>
                           </label>
                         </div>
                       </div>
-                      <div className="flex-1 w-full min-w-[140px]">
-                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Trier par</label>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1 truncate" title="Trier par">Trier par</label>
                         <div className="relative">
                           <select
                             value={sortOption}
                             onChange={(e) => setSortOption(e.target.value as any)}
-                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm appearance-none"
+                            className="w-full px-3 h-[38px] bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm appearance-none"
                           >
                             <option value="relevance">Pertinence</option>
                             <option value="alphabetical">Alphabétique</option>
@@ -1648,7 +1648,7 @@ export default function App() {
                       <button
                         type="submit"
                         disabled={isSearching}
-                        className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-bold transition-all h-[38px] flex items-center justify-center min-w-[120px] shadow-md shadow-blue-600/20"
+                        className="w-full sm:col-span-2 lg:col-span-1 px-6 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-bold transition-all h-[38px] flex items-center justify-center shadow-md shadow-blue-600/20"
                       >
                         {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Filtrer'}
                       </button>
