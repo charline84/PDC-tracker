@@ -27,7 +27,10 @@ import {
   Filter,
   X,
   Star,
-  Pencil
+  Pencil,
+  Heart,
+  Folder,
+  FolderPlus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ExcelJS from 'exceljs';
@@ -342,19 +345,18 @@ export default function App() {
   const [searchNameInput, setSearchNameInput] = useState('');
   const [editingSearchIdx, setEditingSearchIdx] = useState<number | null>(null);
   const [editSearchNameInput, setEditSearchNameInput] = useState('');
+  
+  // Modals for favorite companies
+  const [favoriteFolders, setFavoriteFolders] = useState<{id: string, name: string, companies: CompanyResult[]}[]>([]);
+  const [saveCompanyModalOpen, setSaveCompanyModalOpen] = useState(false);
+  const [companyToSave, setCompanyToSave] = useState<CompanyResult | null>(null);
+  const [newFolderNameInput, setNewFolderNameInput] = useState('');
+  const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([]);
+  const [selectedHomeFolderId, setSelectedHomeFolderId] = useState<string | null>(null);
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const [editFolderNameInput, setEditFolderNameInput] = useState('');
 
-  const [savedSearches, setSavedSearches] = useState<{name: string, q: string[], geoFilter: string, dateFilter: string, statusFilter?: {active: boolean, closed: boolean}, sortOption?: string}[]>(() => {
-    try {
-      const saved = localStorage.getItem('savedSearches');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  React.useEffect(() => {
-    localStorage.setItem('savedSearches', JSON.stringify(savedSearches));
-  }, [savedSearches]);
+  const [savedSearches, setSavedSearches] = useState<{name: string, q: string[], geoFilter: string, dateFilter: string, statusFilter?: {active: boolean, closed: boolean}, sortOption?: string}[]>([]);
 
   const isCurrentSearchSaved = React.useMemo(() => {
     return savedSearches.some(s => 
@@ -384,6 +386,7 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
   const [userData, setUserData] = useState<any>(null);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [notApproved, setNotApproved] = useState(false);
   const [authError, setAuthError] = useState('');
   
@@ -396,6 +399,17 @@ export default function App() {
   const [loginEmail, setLoginEmail] = useState('');
   const [emailLinkSent, setEmailLinkSent] = useState(false);
   const [isVerifyingLink, setIsVerifyingLink] = useState(false);
+
+  React.useEffect(() => {
+    if (isDataLoaded && auth.currentUser) {
+      updateDoc(doc(db, 'users', auth.currentUser.uid), {
+        savedSearches,
+        favoriteFolders
+      }).catch(err => {
+        console.error("Failed to sync user data to Firestore", err);
+      });
+    }
+  }, [savedSearches, favoriteFolders, isDataLoaded]);
 
   React.useEffect(() => {
     const checkEmailLink = async () => {
@@ -435,10 +449,17 @@ export default function App() {
               setIsAuthenticated(false);
               setNotApproved(true);
               setUserData(null);
+              setIsDataLoaded(false);
             } else {
               setIsAuthenticated(true);
               setNotApproved(false);
               setUserData(data);
+              setSavedSearches(data.savedSearches || []);
+              setFavoriteFolders(data.favoriteFolders || []);
+              if (data.favoriteFolders?.length > 0) {
+                setSelectedHomeFolderId(data.favoriteFolders[0].id);
+              }
+              setIsDataLoaded(true);
             }
           } else {
             // New user who hasn't been saved to DB yet or something strange
@@ -447,7 +468,9 @@ export default function App() {
               email: user.email?.toLowerCase() || '',
               role: isCharline ? 'admin' : 'user',
               isApproved: isCharline ? true : false,
-              createdAt: new Date().toISOString()
+              createdAt: new Date().toISOString(),
+              savedSearches: [],
+              favoriteFolders: []
             };
             await setDoc(userDocRef, newUserData);
             
@@ -455,10 +478,14 @@ export default function App() {
               setIsAuthenticated(false);
               setNotApproved(true);
               setUserData(null);
+              setIsDataLoaded(false);
             } else {
               setIsAuthenticated(true);
               setNotApproved(false);
               setUserData(newUserData);
+              setSavedSearches([]);
+              setFavoriteFolders([]);
+              setIsDataLoaded(true);
             }
           }
         } catch (err: any) {
@@ -474,6 +501,7 @@ export default function App() {
         setIsAuthenticated(false);
         setNotApproved(false);
         setUserData(null);
+        setIsDataLoaded(false);
       }
       setAuthChecking(false);
     });
@@ -1384,110 +1412,255 @@ export default function App() {
                       </div>
                     </form>
 
-                    <div className="mt-8">
-                      <div className="flex items-center gap-2 mb-4">
-                        <Star className="w-5 h-5 text-amber-500" />
-                        <h3 className="text-lg font-bold text-slate-800">Recherches favorites</h3>
-                      </div>
-                      
-                      {savedSearches.length === 0 ? (
-                        <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl p-8 text-center text-slate-500">
-                          Aucune recherche favorite pour le moment. Lancez une recherche puis cliquez sur l'étoile pour la sauvegarder.
+                    <div className="mt-8 space-y-12">
+                      <div>
+                        <div className="flex items-center gap-2 mb-4">
+                          <Star className="w-5 h-5 text-amber-500" />
+                          <h3 className="text-lg font-bold text-slate-800">Recherches favorites</h3>
                         </div>
-                      ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          {savedSearches.map((search, idx) => (
-                            <div
-                              key={idx}
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                  e.preventDefault();
+                        
+                        {savedSearches.length === 0 ? (
+                          <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl p-8 text-center text-slate-500">
+                            Aucune recherche favorite pour le moment. Lancez une recherche puis cliquez sur l'étoile pour la sauvegarder.
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {savedSearches.map((search, idx) => (
+                              <div
+                                key={idx}
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    setCompanies(search.q);
+                                    setGeoFilter(search.geoFilter);
+                                    setDateFilter(search.dateFilter as any);
+                                    if (search.statusFilter) setStatusFilter(search.statusFilter);
+                                    if (search.sortOption) setSortOption(search.sortOption as any);
+                                    handleSearch(undefined, search.q);
+                                  }
+                                }}
+                                onClick={() => {
                                   setCompanies(search.q);
                                   setGeoFilter(search.geoFilter);
                                   setDateFilter(search.dateFilter as any);
                                   if (search.statusFilter) setStatusFilter(search.statusFilter);
                                   if (search.sortOption) setSortOption(search.sortOption as any);
                                   handleSearch(undefined, search.q);
-                                }
-                              }}
-                              onClick={() => {
-                                setCompanies(search.q);
-                                setGeoFilter(search.geoFilter);
-                                setDateFilter(search.dateFilter as any);
-                                if (search.statusFilter) setStatusFilter(search.statusFilter);
-                                if (search.sortOption) setSortOption(search.sortOption as any);
-                                handleSearch(undefined, search.q);
-                              }}
-                              className="text-left bg-white p-4 rounded-xl border border-slate-200 hover:border-amber-400 hover:shadow-md transition-all group relative cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
-                            >
-                              <div className="flex justify-between items-start mb-2">
-                                {editingSearchIdx === idx ? (
-                                  <div className="flex-1 mr-4">
-                                    <input 
-                                      type="text" 
-                                      value={editSearchNameInput}
-                                      onChange={e => setEditSearchNameInput(e.target.value)}
-                                      autoFocus
-                                      onClick={e => e.stopPropagation()}
-                                      onKeyDown={e => {
-                                        if (e.key === 'Enter') {
-                                          e.preventDefault();
-                                          e.stopPropagation();
+                                }}
+                                className="text-left bg-white p-4 rounded-xl border border-slate-200 hover:border-amber-400 hover:shadow-md transition-all group relative cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                              >
+                                <div className="flex justify-between items-start mb-2">
+                                  {editingSearchIdx === idx ? (
+                                    <div className="flex-1 mr-4">
+                                      <input 
+                                        type="text" 
+                                        value={editSearchNameInput}
+                                        onChange={e => setEditSearchNameInput(e.target.value)}
+                                        autoFocus
+                                        onClick={e => e.stopPropagation()}
+                                        onKeyDown={e => {
+                                          if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            if (editSearchNameInput.trim()) {
+                                              setSavedSearches(prev => prev.map((s, i) => i === idx ? {...s, name: editSearchNameInput.trim()} : s));
+                                            }
+                                            setEditingSearchIdx(null);
+                                          } else if (e.key === 'Escape') {
+                                            setEditingSearchIdx(null);
+                                          }
+                                        }}
+                                        onBlur={() => {
                                           if (editSearchNameInput.trim()) {
                                             setSavedSearches(prev => prev.map((s, i) => i === idx ? {...s, name: editSearchNameInput.trim()} : s));
                                           }
                                           setEditingSearchIdx(null);
+                                        }}
+                                        className="w-full border-b border-amber-300 focus:border-amber-500 bg-transparent text-slate-900 font-bold outline-none"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-2 group/title">
+                                      <h4 className="font-bold text-slate-900 group-hover:text-amber-700 transition-colors">{search.name}</h4>
+                                      <button
+                                        onClick={e => {
+                                          e.stopPropagation();
+                                          setEditingSearchIdx(idx);
+                                          setEditSearchNameInput(search.name);
+                                        }}
+                                        className="text-slate-300 hover:text-amber-500 opacity-0 group-hover/title:opacity-100 transition-opacity"
+                                      >
+                                        <Pencil className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  )}
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSavedSearches(prev => prev.filter((_, i) => i !== idx));
+                                    }}
+                                    className="absolute top-4 right-4 text-slate-400 hover:text-red-500 transition-colors"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </div>
+                                <div className="flex flex-wrap gap-1">
+                                  {search.q.map((c, i) => (
+                                    <span key={i} className="text-[10px] font-bold px-2 py-1 bg-slate-100 text-slate-600 rounded">
+                                      {c}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <div className="flex items-center gap-2 mb-4">
+                          <Heart className="w-5 h-5 text-red-500" />
+                          <h3 className="text-lg font-bold text-slate-800">Sociétés favorites</h3>
+                        </div>
+
+                        {favoriteFolders.length === 0 ? (
+                          <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl p-8 text-center text-slate-500">
+                            Aucune société favorite. Cliquez sur le cœur lors d'une recherche.
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
+                            <div className="md:col-span-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2 h-full">
+                              <h4 className="text-sm font-bold text-slate-500 uppercase mb-2 px-1">Dossiers</h4>
+                              {favoriteFolders.map(folder => (
+                                <div key={folder.id} className={`group flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors ${selectedHomeFolderId === folder.id ? 'bg-red-50 border border-red-100' : 'hover:bg-slate-50 border border-transparent'}`} onClick={() => setSelectedHomeFolderId(folder.id)}>
+                                  {editingFolderId === folder.id ? (
+                                    <input
+                                      autoFocus
+                                      className="flex-1 bg-white border border-red-300 rounded px-2 py-1 text-sm outline-none text-slate-800"
+                                      value={editFolderNameInput}
+                                      onChange={(e) => setEditFolderNameInput(e.target.value)}
+                                      onClick={e => e.stopPropagation()}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          if (editFolderNameInput.trim()) {
+                                            setFavoriteFolders(prev => prev.map(f => f.id === folder.id ? { ...f, name: editFolderNameInput.trim() } : f));
+                                          }
+                                          setEditingFolderId(null);
                                         } else if (e.key === 'Escape') {
-                                          setEditingSearchIdx(null);
+                                          setEditingFolderId(null);
                                         }
                                       }}
                                       onBlur={() => {
-                                        if (editSearchNameInput.trim()) {
-                                          setSavedSearches(prev => prev.map((s, i) => i === idx ? {...s, name: editSearchNameInput.trim()} : s));
-                                        }
-                                        setEditingSearchIdx(null);
+                                          if (editFolderNameInput.trim()) {
+                                            setFavoriteFolders(prev => prev.map(f => f.id === folder.id ? { ...f, name: editFolderNameInput.trim() } : f));
+                                          }
+                                          setEditingFolderId(null);
                                       }}
-                                      className="w-full border-b border-amber-300 focus:border-amber-500 bg-transparent text-slate-900 font-bold outline-none"
                                     />
+                                  ) : (
+                                    <>
+                                      <div className="flex items-center gap-3 overflow-hidden">
+                                        <Folder className={`w-4 h-4 flex-shrink-0 ${selectedHomeFolderId === folder.id ? 'text-red-500 fill-red-100' : 'text-slate-400'}`} />
+                                        <span className={`font-medium truncate text-sm ${selectedHomeFolderId === folder.id ? 'text-red-800' : 'text-slate-700'}`}>{folder.name}</span>
+                                      </div>
+                                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setEditingFolderId(folder.id);
+                                            setEditFolderNameInput(folder.name);
+                                          }}
+                                          className="p-1.5 text-slate-400 hover:text-amber-500 rounded-md hover:bg-white transition-colors"
+                                          title="Renommer le dossier"
+                                        >
+                                          <Pencil className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const newFolders = favoriteFolders.filter(f => f.id !== folder.id);
+                                            setFavoriteFolders(newFolders);
+                                            if (selectedHomeFolderId === folder.id) {
+                                              setSelectedHomeFolderId(newFolders.length > 0 ? newFolders[0].id : null);
+                                            }
+                                          }}
+                                          className="p-1.5 text-slate-400 hover:text-red-500 rounded-md hover:bg-white transition-colors"
+                                          title="Supprimer le dossier"
+                                        >
+                                          <X className="w-4 h-4" />
+                                        </button>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="md:col-span-8 bg-slate-50/50 p-4 rounded-xl border border-slate-200">
+                              <h4 className="text-sm font-bold text-slate-500 uppercase mb-4 px-1">
+                                {favoriteFolders.find(f => f.id === selectedHomeFolderId)?.name || 'Sociétés'}
+                              </h4>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                {favoriteFolders.find(f => f.id === selectedHomeFolderId)?.companies.map((company, idx) => (
+                                  <div
+                                    key={`${company.siren}-${idx}`}
+                                    className="bg-white p-4 rounded-xl border border-slate-200 hover:border-red-400 hover:shadow-md transition-all relative group flex flex-col justify-between h-full"
+                                  >
+                                    <div>
+                                      <button
+                                        onClick={() => {
+                                          setFavoriteFolders(prev => prev.map(f => {
+                                            if (f.id === selectedHomeFolderId) {
+                                              return {
+                                                ...f,
+                                                companies: f.companies.filter(c => c.siren !== company.siren)
+                                              };
+                                            }
+                                            return f;
+                                          }));
+                                        }}
+                                        className="absolute top-4 right-4 text-slate-300 hover:text-red-500 transition-colors"
+                                        title="Retirer des favoris"
+                                      >
+                                        <X className="w-4 h-4" />
+                                      </button>
+                                      <h5 className="font-bold text-slate-900 mb-1 pr-6 truncate" title={company.nom_complet || company.nom_raison_sociale}>{company.nom_complet || company.nom_raison_sociale}</h5>
+                                    </div>
+                                    <div className="text-xs font-medium text-slate-500 flex items-center gap-2 mt-4 pt-4 border-t border-slate-100">
+                                      <span className="bg-slate-50 px-2 py-1 rounded border border-slate-100">SIREN: {company.siren}</span>
+                                      <button
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          setCompanies([company.nom_complet || company.nom_raison_sociale]);
+                                          setGeoFilter('');
+                                          setDateFilter('all');
+                                          setStatusFilter({active: true, closed: true});
+                                          setSortOption('relevance');
+                                          handleSearch(undefined, [company.nom_complet || company.nom_raison_sociale]);
+                                        }}
+                                        title="Nouvelle recherche"
+                                        className="p-1.5 text-slate-400 hover:text-blue-600 rounded-md transition-colors bg-white border border-slate-200 hover:border-blue-300 ml-auto"
+                                      >
+                                        <Search className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
                                   </div>
-                                ) : (
-                                  <div className="flex items-center gap-2 group/title">
-                                    <h4 className="font-bold text-slate-900 group-hover:text-amber-700 transition-colors">{search.name}</h4>
-                                    <button
-                                      onClick={e => {
-                                        e.stopPropagation();
-                                        setEditingSearchIdx(idx);
-                                        setEditSearchNameInput(search.name);
-                                      }}
-                                      className="text-slate-300 hover:text-amber-500 opacity-0 group-hover/title:opacity-100 transition-opacity"
-                                    >
-                                      <Pencil className="w-3 h-3" />
-                                    </button>
+                                ))}
+                                {(!favoriteFolders.find(f => f.id === selectedHomeFolderId)?.companies || favoriteFolders.find(f => f.id === selectedHomeFolderId)?.companies.length === 0) && (
+                                  <div className="col-span-full text-center text-sm text-slate-500 py-8 bg-white border border-dashed border-slate-200 rounded-xl">
+                                    Ce dossier est vide.
                                   </div>
                                 )}
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSavedSearches(prev => prev.filter((_, i) => i !== idx));
-                                  }}
-                                  className="absolute top-4 right-4 text-slate-400 hover:text-red-500 transition-colors"
-                                >
-                                  <X className="w-4 h-4" />
-                                </button>
-                              </div>
-                              <div className="flex flex-wrap gap-1">
-                                {search.q.map((c, i) => (
-                                  <span key={i} className="text-[10px] font-bold px-2 py-1 bg-slate-100 text-slate-600 rounded">
-                                    {c}
-                                  </span>
-                                ))}
                               </div>
                             </div>
-                          ))}
-                        </div>
-                      )}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </motion.div>
                 ) : (
@@ -1667,11 +1840,40 @@ export default function App() {
                             className="bg-white p-5 rounded-2xl border border-slate-200 hover:border-blue-400 hover:shadow-lg transition-all h-full flex flex-col relative overflow-hidden"
                           >
                             <div className="absolute top-0 right-0 w-16 h-16 bg-blue-50 rounded-bl-full -z-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setCompanyToSave(result);
+                                setSelectedFolderIds(favoriteFolders.filter(f => f.companies.some(c => c.siren === result.siren)).map(f => f.id));
+                                setSaveCompanyModalOpen(true);
+                              }}
+                              className={`absolute top-4 right-4 z-20 hover:scale-110 transition-all ${favoriteFolders.some(f => f.companies.some(c => c.siren === result.siren)) ? 'text-red-500' : 'text-slate-300 hover:text-red-500'}`}
+                              title="Ajouter aux favoris"
+                            >
+                              <Heart className="w-5 h-5 fill-current" />
+                            </button>
                             
                             <div className="flex justify-between items-start mb-4 relative z-10">
-                              <div>
-                                <h3 className="font-bold text-slate-900 transition-colors">
-                                  {result.nom_complet || result.nom_raison_sociale}
+                              <div className="flex-1 pr-12">
+                                <h3 className="font-bold text-slate-900 transition-colors flex items-center flex-wrap gap-2">
+                                  <span>{result.nom_complet || result.nom_raison_sociale}</span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      setCompanies([result.nom_complet || result.nom_raison_sociale]);
+                                      setGeoFilter('');
+                                      setDateFilter('all');
+                                      setStatusFilter({active: true, closed: true});
+                                      setSortOption('relevance');
+                                      handleSearch(undefined, [result.nom_complet || result.nom_raison_sociale]);
+                                    }}
+                                    title="Nouvelle recherche sur cette société"
+                                    className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors group/search"
+                                  >
+                                    <Search className="w-4 h-4 group-hover/search:scale-110 transition-transform" />
+                                  </button>
                                 </h3>
                                 <div className="flex flex-wrap items-center gap-2 mt-2">
                                   <button
@@ -2304,6 +2506,119 @@ export default function App() {
                   className="px-6 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold shadow-md shadow-amber-500/20 transition-all"
                 >
                   Sauvegarder
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {saveCompanyModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md border border-slate-200"
+          >
+            <h2 className="text-2xl font-black text-slate-900 mb-2">Ajouter aux favoris</h2>
+            <p className="text-slate-600 mb-6">
+              Choisissez un ou plusieurs dossiers pour y ajouter <span className="font-bold text-slate-800">{companyToSave?.nom_complet || companyToSave?.nom_raison_sociale}</span>.
+            </p>
+            <div className="space-y-4">
+              {favoriteFolders.length > 0 && (
+                <div className="max-h-48 overflow-y-auto space-y-2 border border-slate-200 rounded-lg p-2 bg-slate-50">
+                  {favoriteFolders.map(folder => (
+                    <label key={folder.id} className="flex items-center gap-3 p-2 hover:bg-white rounded cursor-pointer transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={selectedFolderIds.includes(folder.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedFolderIds(prev => [...prev, folder.id]);
+                          } else {
+                            setSelectedFolderIds(prev => prev.filter(id => id !== folder.id));
+                          }
+                        }}
+                        className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                      />
+                      <Folder className="w-4 h-4 text-slate-400" />
+                      <span className="font-medium text-slate-700">{folder.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">Ou créer un nouveau dossier</label>
+                <input
+                  type="text"
+                  value={newFolderNameInput}
+                  onChange={(e) => setNewFolderNameInput(e.target.value)}
+                  placeholder="Nom du nouveau dossier..."
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      // Submit the whole form logically
+                    }
+                  }}
+                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                />
+              </div>
+              
+              <div className="flex justify-end gap-3 pt-4">
+                <button
+                  onClick={() => {
+                    setSaveCompanyModalOpen(false);
+                    setNewFolderNameInput('');
+                  }}
+                  className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={() => {
+                    let updatedFolders = [...favoriteFolders];
+                    
+                    if (newFolderNameInput.trim()) {
+                      const newFolderId = Date.now().toString();
+                      updatedFolders.push({
+                        id: newFolderId,
+                        name: newFolderNameInput.trim(),
+                        companies: companyToSave ? [companyToSave] : []
+                      });
+                      if (!selectedHomeFolderId) setSelectedHomeFolderId(newFolderId);
+                    }
+                    
+                    if (companyToSave) {
+                      updatedFolders = updatedFolders.map(folder => {
+                        if (selectedFolderIds.includes(folder.id) || (newFolderNameInput.trim() && folder.id === updatedFolders[updatedFolders.length - 1].id)) {
+                          // Add if not exists
+                          if (!folder.companies.some(c => c.siren === companyToSave.siren)) {
+                            return {
+                              ...folder,
+                              companies: [...folder.companies, companyToSave]
+                            };
+                          }
+                        } else {
+                          // Remove if exists
+                          if (folder.companies.some(c => c.siren === companyToSave.siren)) {
+                            return {
+                              ...folder,
+                              companies: folder.companies.filter(c => c.siren !== companyToSave.siren)
+                            };
+                          }
+                        }
+                        return folder;
+                      });
+                    }
+                    
+                    setFavoriteFolders(updatedFolders);
+                    setSaveCompanyModalOpen(false);
+                    setNewFolderNameInput('');
+                  }}
+                  className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold shadow-md shadow-blue-600/20 transition-all"
+                >
+                  Enregistrer
                 </button>
               </div>
             </div>
