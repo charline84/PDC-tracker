@@ -91,7 +91,7 @@ interface Partner {
   originalData: any;
 }
 
-const PartnerAnalysis = ({ results, onClose, onViewAds }: { results: CompanyResult[], onClose: () => void, onViewAds: (queryName: string) => void }) => {
+const PartnerAnalysis = ({ results, onClose, onViewAds, favoriteFolders, onSaveCompany }: { results: CompanyResult[], onClose: () => void, onViewAds: (queryName: string) => void, favoriteFolders: {id: string, companies: CompanyResult[]}[], onSaveCompany: (company: CompanyResult) => void }) => {
   const [selectedPartnerIds, setSelectedPartnerIds] = React.useState<string[]>([]);
   const [partnerFilter, setPartnerFilter] = React.useState('');
 
@@ -238,8 +238,19 @@ const PartnerAnalysis = ({ results, onClose, onViewAds }: { results: CompanyResu
                 <div className="space-y-4">
                    {investedCompanies.map((comp, idx) => (
                       <div key={idx} className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-md transition-shadow flex flex-col">
-                         <div className="flex justify-between items-start mb-4">
-                            <div>
+                         <div className="flex justify-between items-start mb-4 relative">
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                onSaveCompany(comp);
+                              }}
+                              className={`absolute -top-2 -right-2 p-2 hover:scale-110 transition-transform ${favoriteFolders.some(f => f.companies.some(c => c.siren === comp.siren)) ? 'text-red-500' : 'text-slate-300 hover:text-red-500'}`}
+                              title="Ajouter aux favoris"
+                            >
+                              <Heart className="w-5 h-5 fill-current" />
+                            </button>
+                            <div className="pr-8">
                                <div className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded inline-block mb-2 uppercase tracking-wider">
                                  Nom de la société
                                </div>
@@ -251,7 +262,7 @@ const PartnerAnalysis = ({ results, onClose, onViewAds }: { results: CompanyResu
                                  </div>
                                )}
                             </div>
-                            <div className="flex flex-col items-end gap-2">
+                            <div className="flex flex-col items-end gap-2 mt-8">
                                {comp.siege?.etat_administratif && (
                                   <span className={`px-3 py-1 rounded text-xs font-bold ${
                                     comp.siege.etat_administratif === 'A' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
@@ -762,6 +773,113 @@ export default function App() {
       setError('Erreur de connexion à l\'API data.gouv.fr.');
     } finally {
       setIsSearching(false);
+    }
+  };
+
+  const handleExportFavorites = async () => {
+    if (favoriteFolders.length === 0) return;
+
+    try {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Sociétés Favorites");
+
+      const headerStyle: Partial<ExcelJS.Style> = {
+        font: { bold: true, color: { argb: "FFFFFF" }, size: 11, name: 'Arial' },
+        fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'D93025' } }, // Red color for favorites
+        alignment: { horizontal: 'center', vertical: 'middle', wrapText: true },
+        border: {
+          top: { style: 'thin', color: { argb: 'D9D9D9' } },
+          left: { style: 'thin', color: { argb: 'D9D9D9' } },
+          bottom: { style: 'thin', color: { argb: 'D9D9D9' } },
+          right: { style: 'thin', color: { argb: 'D9D9D9' } }
+        }
+      };
+
+      const columns = [
+        { header: 'Dossier', key: 'dossier', width: 25 },
+        { header: 'Nom de la société', key: 'nom', width: 45 },
+        { header: 'SIREN', key: 'siren', width: 14 },
+        { header: 'Date de création', key: 'date_creation', width: 15 },
+        { header: 'Date de clôture', key: 'date_fermeture', width: 15 },
+        { header: 'Code NAF/APE', key: 'code_naf', width: 15 },
+        { header: 'NAF 2025', key: 'naf_2025', width: 15 },
+        { header: 'Dirigeants / Sociétés partenaires', key: 'dirigeants', width: 55 },
+        { header: 'Adresse du siège', key: 'adresse', width: 40 },
+        { header: 'Code postal', key: 'cp', width: 12 },
+        { header: 'Commune', key: 'commune', width: 20 },
+        { header: 'État', key: 'etat', width: 10 },
+      ];
+
+      worksheet.columns = columns;
+
+      worksheet.getRow(1).eachCell((cell) => {
+        cell.style = headerStyle;
+      });
+      worksheet.getRow(1).height = 35;
+
+      let rowIndex = 0;
+      favoriteFolders.forEach((folder) => {
+        folder.companies.forEach((result) => {
+          const siege = result.siege || {};
+          
+          const dirigeantsArr = result.dirigeants || [];
+          const dirigeantsStr = dirigeantsArr.map((d: any) => {
+            if (d.denomination) return d.denomination;
+            const nomComplet = [d.prenoms, d.nom].filter(Boolean).join(" ");
+            return d.qualite ? `${nomComplet} (${d.qualite})` : nomComplet;
+          }).filter(Boolean).join(", ");
+
+          const adresseStr = [siege.adresse, siege.code_postal, siege.commune].filter(Boolean).join(", ");
+          const etat = siege.etat_administratif === 'A' ? 'Active' : (siege.etat_administratif === 'F' ? 'Fermée' : siege.etat_administratif);
+
+          const row = worksheet.addRow({
+            dossier: folder.name || "",
+            nom: result.nom_complet || result.nom_raison_sociale || "",
+            siren: result.siren || "",
+            date_creation: result.date_creation || "",
+            date_fermeture: result.date_fermeture || "",
+            code_naf: getNafLabel(result.activite_principale) || "",
+            naf_2025: result.activite_principale_naf25 || "",
+            dirigeants: dirigeantsStr,
+            adresse: adresseStr,
+            cp: siege.code_postal || "",
+            commune: siege.commune || "",
+            etat: etat
+          });
+
+          if (rowIndex % 2 === 1) {
+            row.eachCell((cell) => {
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FCE8E6' } }; // Light red/pink alternate row
+            });
+          }
+          
+          row.eachCell((cell) => {
+            cell.alignment = { vertical: 'top', wrapText: true };
+            cell.font = { name: 'Arial', size: 10 };
+            cell.border = {
+              top: { style: 'thin', color: { argb: 'D9D9D9' } },
+              left: { style: 'thin', color: { argb: 'D9D9D9' } },
+              bottom: { style: 'thin', color: { argb: 'D9D9D9' } },
+              right: { style: 'thin', color: { argb: 'D9D9D9' } }
+            };
+          });
+          
+          rowIndex++;
+        });
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Societes_Favorites_${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Erreur lors de l'exportation des favoris", error);
     }
   };
 
@@ -1523,6 +1641,15 @@ export default function App() {
                         <div className="flex items-center gap-2 mb-4">
                           <Heart className="w-5 h-5 text-red-500" />
                           <h3 className="text-lg font-bold text-slate-800">Sociétés favorites</h3>
+                          {favoriteFolders.length > 0 && (
+                            <button
+                              onClick={() => handleExportFavorites()}
+                              className="ml-auto px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 font-medium rounded-lg transition-colors text-sm flex items-center gap-2"
+                              title="Exporter les favoris"
+                            >
+                              <Download className="w-4 h-4" /> Export
+                            </button>
+                          )}
                         </div>
 
                         {favoriteFolders.length === 0 ? (
@@ -1628,7 +1755,7 @@ export default function App() {
                                       >
                                         <X className="w-4 h-4" />
                                       </button>
-                                      <h5 className="font-bold text-slate-900 mb-1 pr-6 truncate" title={company.nom_complet || company.nom_raison_sociale}>{company.nom_complet || company.nom_raison_sociale}</h5>
+                                      <h5 className="text-sm leading-snug font-bold text-slate-900 mb-1 pr-6" title={company.nom_complet || company.nom_raison_sociale}>{company.nom_complet || company.nom_raison_sociale}</h5>
                                     </div>
                                     <div className="text-xs font-medium text-slate-500 flex items-center gap-2 mt-4 pt-4 border-t border-slate-100">
                                       <span className="bg-slate-50 px-2 py-1 rounded border border-slate-100">SIREN: {company.siren}</span>
@@ -2425,6 +2552,12 @@ export default function App() {
         <PartnerAnalysis 
           results={results}
           onClose={() => setShowPartnerAnalysis(false)} 
+          favoriteFolders={favoriteFolders}
+          onSaveCompany={(company) => {
+            setCompanyToSave(company);
+            setSelectedFolderIds(favoriteFolders.filter(f => f.companies.some(c => c.siren === company.siren)).map(f => f.id));
+            setSaveCompanyModalOpen(true);
+          }}
           onViewAds={(queryName) => {
             setShowPartnerAnalysis(false);
             setActiveModule('ads');
