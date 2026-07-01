@@ -26,7 +26,8 @@ import {
   ArrowLeft,
   Filter,
   X,
-  Star
+  Star,
+  Pencil
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ExcelJS from 'exceljs';
@@ -327,12 +328,22 @@ export default function App() {
   const [companies, setCompanies] = useState<string[]>(['']);
   const [geoFilter, setGeoFilter] = useState('');
   const [dateFilter, setDateFilter] = useState<'all' | '6_months' | '1_year' | '2_years' | '5_years' | 'more_5_years'>('all');
+  const [statusFilter, setStatusFilter] = useState({ active: true, closed: true });
+  const [sortOption, setSortOption] = useState<'relevance' | 'alphabetical' | 'date_creation'>('relevance');
+  
   const [isSearching, setIsSearching] = useState(false);
   const [results, setResults] = useState<CompanyResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'search' | 'results'>('search');
   const [showPartnerAnalysis, setShowPartnerAnalysis] = useState(false);
-  const [savedSearches, setSavedSearches] = useState<{name: string, q: string[], geoFilter: string, dateFilter: string}[]>(() => {
+  
+  // Modals for saved searches
+  const [saveSearchModalOpen, setSaveSearchModalOpen] = useState(false);
+  const [searchNameInput, setSearchNameInput] = useState('');
+  const [editingSearchIdx, setEditingSearchIdx] = useState<number | null>(null);
+  const [editSearchNameInput, setEditSearchNameInput] = useState('');
+
+  const [savedSearches, setSavedSearches] = useState<{name: string, q: string[], geoFilter: string, dateFilter: string, statusFilter?: {active: boolean, closed: boolean}, sortOption?: string}[]>(() => {
     try {
       const saved = localStorage.getItem('savedSearches');
       return saved ? JSON.parse(saved) : [];
@@ -349,9 +360,11 @@ export default function App() {
     return savedSearches.some(s => 
       JSON.stringify(s.q) === JSON.stringify(companies) &&
       s.geoFilter === geoFilter &&
-      s.dateFilter === dateFilter
+      s.dateFilter === dateFilter &&
+      (s.statusFilter ? (s.statusFilter.active === statusFilter.active && s.statusFilter.closed === statusFilter.closed) : true) &&
+      (s.sortOption ? s.sortOption === sortOption : true)
     );
-  }, [savedSearches, companies, geoFilter, dateFilter]);
+  }, [savedSearches, companies, geoFilter, dateFilter, statusFilter, sortOption]);
 
   // ADS State
   const [adsSearchType, setAdsSearchType] = useState<'company' | 'permit' | 'geo'>('geo');
@@ -679,6 +692,17 @@ export default function App() {
               });
             }
 
+            // Client side status filtering
+            if (!statusFilter.active || !statusFilter.closed) {
+              resultsWithMeta = resultsWithMeta.filter((r: any) => {
+                const etat = r.siege?.etat_administratif;
+                if (!etat) return false; // Default to hide if unknown
+                if (etat === 'A' && statusFilter.active) return true;
+                if (etat !== 'A' && statusFilter.closed) return true;
+                return false;
+              });
+            }
+
             filteredResults.push(...resultsWithMeta);
             totalPages = Math.min(data.total_pages, 5); // Limite raisonnable client-side
           } else {
@@ -686,6 +710,21 @@ export default function App() {
           }
           page++;
         }
+      }
+
+      // Sort results
+      if (sortOption === 'alphabetical') {
+        filteredResults.sort((a, b) => {
+          const nameA = (a.nom_complet || a.nom_raison_sociale || '').toLowerCase();
+          const nameB = (b.nom_complet || b.nom_raison_sociale || '').toLowerCase();
+          return nameA.localeCompare(nameB);
+        });
+      } else if (sortOption === 'date_creation') {
+        filteredResults.sort((a, b) => {
+          const dateA = a.date_creation ? new Date(a.date_creation).getTime() : 0;
+          const dateB = b.date_creation ? new Date(b.date_creation).getTime() : 0;
+          return dateB - dateA; // Descending (newest first)
+        });
       }
 
       setResults(filteredResults);
@@ -921,7 +960,7 @@ export default function App() {
     setAuthError('');
     try {
       const actionCodeSettings = {
-        url: window.location.origin,
+        url: window.location.href,
         handleCodeInApp: true,
       };
       await sendSignInLinkToEmail(auth, loginEmail, actionCodeSettings);
@@ -1236,7 +1275,7 @@ export default function App() {
                           Ajouter une autre société
                         </button>
                         
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4 pt-4 border-t border-slate-100">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-100">
                           <div>
                             <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Zone géographique (Optionnel)</label>
                             <div className="relative">
@@ -1269,6 +1308,43 @@ export default function App() {
                                 <option value="2_years">Moins de 2 ans</option>
                                 <option value="5_years">Moins de 5 ans</option>
                                 <option value="more_5_years">Plus de 5 ans</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Statut</label>
+                            <div className="flex items-center gap-3 h-[38px] px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm">
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <input 
+                                  type="checkbox" 
+                                  checked={statusFilter.active}
+                                  onChange={(e) => setStatusFilter(prev => ({...prev, active: e.target.checked}))}
+                                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" 
+                                />
+                                <span className="font-medium text-slate-700">Active</span>
+                              </label>
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <input 
+                                  type="checkbox" 
+                                  checked={statusFilter.closed}
+                                  onChange={(e) => setStatusFilter(prev => ({...prev, closed: e.target.checked}))}
+                                  className="w-4 h-4 text-red-600 rounded focus:ring-blue-500" 
+                                />
+                                <span className="font-medium text-slate-700">Fermée</span>
+                              </label>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Trier par</label>
+                            <div className="relative">
+                              <select
+                                value={sortOption}
+                                onChange={(e) => setSortOption(e.target.value as any)}
+                                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm appearance-none"
+                              >
+                                <option value="relevance">Pertinence</option>
+                                <option value="alphabetical">Alphabétique</option>
+                                <option value="date_creation">Date de création</option>
                               </select>
                             </div>
                           </div>
@@ -1321,18 +1397,76 @@ export default function App() {
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           {savedSearches.map((search, idx) => (
-                            <button
+                            <div
                               key={idx}
+                              role="button"
+                              tabIndex={0}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  setCompanies(search.q);
+                                  setGeoFilter(search.geoFilter);
+                                  setDateFilter(search.dateFilter as any);
+                                  if (search.statusFilter) setStatusFilter(search.statusFilter);
+                                  if (search.sortOption) setSortOption(search.sortOption as any);
+                                  handleSearch(undefined, search.q);
+                                }
+                              }}
                               onClick={() => {
                                 setCompanies(search.q);
                                 setGeoFilter(search.geoFilter);
                                 setDateFilter(search.dateFilter as any);
+                                if (search.statusFilter) setStatusFilter(search.statusFilter);
+                                if (search.sortOption) setSortOption(search.sortOption as any);
                                 handleSearch(undefined, search.q);
                               }}
-                              className="text-left bg-white p-4 rounded-xl border border-slate-200 hover:border-amber-400 hover:shadow-md transition-all group relative"
+                              className="text-left bg-white p-4 rounded-xl border border-slate-200 hover:border-amber-400 hover:shadow-md transition-all group relative cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
                             >
                               <div className="flex justify-between items-start mb-2">
-                                <h4 className="font-bold text-slate-900 group-hover:text-amber-700 transition-colors pr-6">{search.name}</h4>
+                                {editingSearchIdx === idx ? (
+                                  <div className="flex-1 mr-4">
+                                    <input 
+                                      type="text" 
+                                      value={editSearchNameInput}
+                                      onChange={e => setEditSearchNameInput(e.target.value)}
+                                      autoFocus
+                                      onClick={e => e.stopPropagation()}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          if (editSearchNameInput.trim()) {
+                                            setSavedSearches(prev => prev.map((s, i) => i === idx ? {...s, name: editSearchNameInput.trim()} : s));
+                                          }
+                                          setEditingSearchIdx(null);
+                                        } else if (e.key === 'Escape') {
+                                          setEditingSearchIdx(null);
+                                        }
+                                      }}
+                                      onBlur={() => {
+                                        if (editSearchNameInput.trim()) {
+                                          setSavedSearches(prev => prev.map((s, i) => i === idx ? {...s, name: editSearchNameInput.trim()} : s));
+                                        }
+                                        setEditingSearchIdx(null);
+                                      }}
+                                      className="w-full border-b border-amber-300 focus:border-amber-500 bg-transparent text-slate-900 font-bold outline-none"
+                                    />
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-2 group/title">
+                                    <h4 className="font-bold text-slate-900 group-hover:text-amber-700 transition-colors">{search.name}</h4>
+                                    <button
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        setEditingSearchIdx(idx);
+                                        setEditSearchNameInput(search.name);
+                                      }}
+                                      className="text-slate-300 hover:text-amber-500 opacity-0 group-hover/title:opacity-100 transition-opacity"
+                                    >
+                                      <Pencil className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                )}
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -1350,7 +1484,7 @@ export default function App() {
                                   </span>
                                 ))}
                               </div>
-                            </button>
+                            </div>
                           ))}
                         </div>
                       )}
@@ -1390,6 +1524,9 @@ export default function App() {
                                   if (geoFilter) {
                                     searchName += (searchName ? ' - ' : '') + geoFilter;
                                   }
+                                  if (dateFilter && dateFilter !== 'all') {
+                                    searchName += (searchName ? ' - ' : '') + dateFilter;
+                                  }
                                   if (!searchName) {
                                     searchName = 'Recherche du ' + new Date().toLocaleDateString();
                                   }
@@ -1401,12 +1538,8 @@ export default function App() {
                                     counter++;
                                   }
                                   
-                                  setSavedSearches(prev => [...prev, {
-                                    name: finalName,
-                                    q: companies,
-                                    geoFilter,
-                                    dateFilter
-                                  }]);
+                                  setSearchNameInput(finalName);
+                                  setSaveSearchModalOpen(true);
                                 }
                               }}
                               className={`p-1 rounded-md transition-colors flex items-center justify-center group relative ${isCurrentSearchSaved ? 'text-amber-500 hover:text-slate-400 hover:bg-slate-50' : 'text-slate-400 hover:text-amber-500 hover:bg-amber-50'}`}
@@ -1439,9 +1572,9 @@ export default function App() {
                       </div>
                     </div>
 
-                    <form onSubmit={(e) => handleSearch(e)} className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col md:flex-row gap-4 items-end">
-                      <div className="flex-1 w-full">
-                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Zone géographique (Optionnel)</label>
+                    <form onSubmit={(e) => handleSearch(e)} className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col md:flex-row gap-4 items-end flex-wrap">
+                      <div className="flex-1 w-full min-w-[200px]">
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Zone géographique</label>
                         <div className="relative">
                           <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
                             <MapPin className="w-4 h-4 text-slate-400" />
@@ -1455,7 +1588,7 @@ export default function App() {
                           />
                         </div>
                       </div>
-                      <div className="flex-1 w-full">
+                      <div className="flex-1 w-full min-w-[150px]">
                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Date de création</label>
                         <div className="relative">
                           <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
@@ -1475,10 +1608,47 @@ export default function App() {
                           </select>
                         </div>
                       </div>
+                      <div className="flex-1 w-full min-w-[160px]">
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Statut</label>
+                        <div className="flex items-center gap-3 h-[38px] px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input 
+                              type="checkbox" 
+                              checked={statusFilter.active}
+                              onChange={(e) => setStatusFilter(prev => ({...prev, active: e.target.checked}))}
+                              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" 
+                            />
+                            <span className="font-medium text-slate-700">Active</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input 
+                              type="checkbox" 
+                              checked={statusFilter.closed}
+                              onChange={(e) => setStatusFilter(prev => ({...prev, closed: e.target.checked}))}
+                              className="w-4 h-4 text-red-600 rounded focus:ring-blue-500" 
+                            />
+                            <span className="font-medium text-slate-700">Fermée</span>
+                          </label>
+                        </div>
+                      </div>
+                      <div className="flex-1 w-full min-w-[140px]">
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Trier par</label>
+                        <div className="relative">
+                          <select
+                            value={sortOption}
+                            onChange={(e) => setSortOption(e.target.value as any)}
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all text-sm appearance-none"
+                          >
+                            <option value="relevance">Pertinence</option>
+                            <option value="alphabetical">Alphabétique</option>
+                            <option value="date_creation">Date de création</option>
+                          </select>
+                        </div>
+                      </div>
                       <button
                         type="submit"
                         disabled={isSearching}
-                        className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-bold transition-all h-[42px] flex items-center justify-center min-w-[120px] shadow-md shadow-blue-600/20"
+                        className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-bold transition-all h-[38px] flex items-center justify-center min-w-[120px] shadow-md shadow-blue-600/20"
                       >
                         {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Filtrer'}
                       </button>
@@ -2061,6 +2231,84 @@ export default function App() {
             triggerAdsSearch(queryName, 'company');
           }}
         />
+      )}
+
+      {saveSearchModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl border border-slate-200 p-6 w-full max-w-md relative"
+          >
+            <button
+              onClick={() => setSaveSearchModalOpen(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
+              <Star className="w-6 h-6 text-amber-500 fill-amber-500" />
+              Sauvegarder la recherche
+            </h3>
+            <p className="text-slate-500 text-sm mb-6">
+              Donnez un nom à cette recherche pour la retrouver facilement plus tard.
+            </p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">Nom de la recherche</label>
+                <input
+                  type="text"
+                  value={searchNameInput}
+                  onChange={(e) => setSearchNameInput(e.target.value)}
+                  autoFocus
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (searchNameInput.trim()) {
+                        setSavedSearches(prev => [...prev, {
+                          name: searchNameInput.trim(),
+                          q: companies,
+                          geoFilter,
+                          dateFilter,
+                          statusFilter,
+                          sortOption
+                        }]);
+                        setSaveSearchModalOpen(false);
+                      }
+                    }
+                  }}
+                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition-all"
+                />
+              </div>
+              <div className="flex justify-end gap-3 pt-4">
+                <button
+                  onClick={() => setSaveSearchModalOpen(false)}
+                  className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={() => {
+                    if (searchNameInput.trim()) {
+                      setSavedSearches(prev => [...prev, {
+                        name: searchNameInput.trim(),
+                        q: companies,
+                        geoFilter,
+                        dateFilter,
+                        statusFilter,
+                        sortOption
+                      }]);
+                      setSaveSearchModalOpen(false);
+                    }
+                  }}
+                  className="px-6 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold shadow-md shadow-amber-500/20 transition-all"
+                >
+                  Sauvegarder
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
       )}
 
       <footer className="max-w-5xl mx-auto px-4 py-8 text-center border-t border-slate-200 mt-12 bg-white flex flex-col sm:flex-row items-center justify-between">
