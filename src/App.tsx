@@ -204,8 +204,39 @@ const PartnerAnalysis = ({ results, onClose, onViewAds, favoriteFolders, onSaveC
                           isSelected ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20' : 'hover:bg-slate-50 text-slate-700'
                         }`}
                       >
-                          <span className="truncate pr-2 text-left">{p.name}</span>
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                          <span className="truncate pr-2 text-left flex items-center gap-2">
+                            {p.name}
+                            {p.type === 'company' && p.originalData?.siren && (
+                              <div
+                                role="button"
+                                tabIndex={0}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  onSaveCompany({
+                                     siren: p.originalData.siren,
+                                     nom_complet: p.name,
+                                     nom_raison_sociale: p.name,
+                                     sigle: '',
+                                     date_creation: '',
+                                     date_fermeture: '',
+                                     etat_administratif: '',
+                                     activite_principale: '',
+                                     activite_principale_naf25: '',
+                                     categorie_entreprise: '',
+                                     siege: { adresse: '', code_postal: '', commune: '', departement: '', etat_administratif: '' },
+                                     dirigeants: [],
+                                     _search_term: p.name
+                                  });
+                                }}
+                                className={`p-1 rounded-full hover:bg-white/20 transition-colors ${favoriteFolders.some(f => f.companies.some(c => c.siren === p.originalData.siren)) ? 'text-red-500' : (isSelected ? 'text-blue-200 hover:text-red-200' : 'text-slate-300 hover:text-red-500')}`}
+                                title="Ajouter aux favoris"
+                              >
+                                <Heart className="w-3.5 h-3.5 fill-current" />
+                              </div>
+                            )}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold shrink-0 ${
                             isSelected ? 'bg-blue-500/50 text-white' : 'bg-slate-100 text-slate-500'
                           }`}>
                             {p.count}
@@ -238,21 +269,23 @@ const PartnerAnalysis = ({ results, onClose, onViewAds, favoriteFolders, onSaveC
                 <div className="space-y-4">
                    {investedCompanies.map((comp, idx) => (
                       <div key={idx} className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-md transition-shadow flex flex-col">
-                         <div className="flex justify-between items-start mb-4 relative">
-                            <button
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                onSaveCompany(comp);
-                              }}
-                              className={`absolute -top-2 -right-2 p-2 hover:scale-110 transition-transform ${favoriteFolders.some(f => f.companies.some(c => c.siren === comp.siren)) ? 'text-red-500' : 'text-slate-300 hover:text-red-500'}`}
-                              title="Ajouter aux favoris"
-                            >
-                              <Heart className="w-5 h-5 fill-current" />
-                            </button>
-                            <div className="pr-8">
-                               <div className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded inline-block mb-2 uppercase tracking-wider">
-                                 Nom de la société
+                         <div className="flex justify-between items-start mb-4">
+                            <div className="pr-4 flex-1">
+                               <div className="flex items-center gap-3 mb-2">
+                                 <div className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded inline-block uppercase tracking-wider">
+                                   Nom de la société
+                                 </div>
+                                 <button
+                                   onClick={(e) => {
+                                     e.preventDefault();
+                                     e.stopPropagation();
+                                     onSaveCompany(comp);
+                                   }}
+                                   className={`p-1.5 rounded-full hover:bg-slate-100 transition-colors ${favoriteFolders.some(f => f.companies.some(c => c.siren === comp.siren)) ? 'text-red-500' : 'text-slate-300 hover:text-red-500'}`}
+                                   title="Ajouter aux favoris"
+                                 >
+                                   <Heart className="w-4 h-4 fill-current" />
+                                 </button>
                                </div>
                                <h4 className="text-xl font-black text-slate-900 mb-2">{comp.nom_complet || comp.nom_raison_sociale}</h4>
                                {comp.siege && (comp.siege.adresse || comp.siege.code_postal) && (
@@ -262,7 +295,7 @@ const PartnerAnalysis = ({ results, onClose, onViewAds, favoriteFolders, onSaveC
                                  </div>
                                )}
                             </div>
-                            <div className="flex flex-col items-end gap-2 mt-8">
+                            <div className="flex flex-col items-end gap-2 shrink-0">
                                {comp.siege?.etat_administratif && (
                                   <span className={`px-3 py-1 rounded text-xs font-bold ${
                                     comp.siege.etat_administratif === 'A' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
@@ -290,16 +323,48 @@ const PartnerAnalysis = ({ results, onClose, onViewAds, favoriteFolders, onSaveC
                                   const id = name.toLowerCase();
                                   const isSelected = selectedPartnerIds.includes(id);
                                   return (
-                                    <button 
-                                      key={didx} 
-                                      onClick={() => togglePartner(id)}
-                                      className={`text-xs font-bold px-3 py-1.5 rounded border transition-colors ${
+                                    <div key={didx} className={`inline-flex items-center rounded border transition-colors ${
                                       isSelected 
-                                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm hover:bg-blue-700' 
-                                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:border-slate-300'
+                                      ? 'bg-blue-600 border-blue-600 shadow-sm' 
+                                      : 'bg-white border-slate-200 hover:border-slate-300'
                                     }`}>
-                                      {name}
-                                    </button>
+                                      <button 
+                                        onClick={() => togglePartner(id)}
+                                        className={`text-xs font-bold px-3 py-1.5 ${
+                                        isSelected 
+                                        ? 'text-white hover:bg-blue-700' 
+                                        : 'text-slate-600 hover:bg-slate-50'
+                                      } ${(!d.nom && d.siren) ? 'rounded-l' : 'rounded'}`}>
+                                        {name}
+                                      </button>
+                                      {!d.nom && d.siren && (
+                                        <button
+                                          onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            onSaveCompany({
+                                               siren: d.siren,
+                                               nom_complet: name,
+                                               nom_raison_sociale: name,
+                                               sigle: '',
+                                               date_creation: '',
+                                               date_fermeture: '',
+                                               etat_administratif: '',
+                                               activite_principale: '',
+                                               activite_principale_naf25: '',
+                                               categorie_entreprise: '',
+                                               siege: { adresse: '', code_postal: '', commune: '', departement: '', etat_administratif: '' },
+                                               dirigeants: [],
+                                               _search_term: name
+                                            });
+                                          }}
+                                          className={`px-2 py-1.5 border-l ${isSelected ? 'border-blue-500 hover:bg-blue-700 text-white rounded-r' : 'border-slate-100 hover:bg-slate-50 rounded-r'} transition-colors ${favoriteFolders.some(f => f.companies.some(c => c.siren === d.siren)) ? '!text-red-500 hover:!text-red-600' : (isSelected ? 'text-blue-200 hover:text-red-200' : 'text-slate-300 hover:text-red-500')}`}
+                                          title="Ajouter aux favoris"
+                                        >
+                                          <Heart className="w-3.5 h-3.5 fill-current" />
+                                        </button>
+                                      )}
+                                    </div>
                                   )
                                })}
                             </div>
@@ -1755,7 +1820,7 @@ export default function App() {
                                       >
                                         <X className="w-4 h-4" />
                                       </button>
-                                      <h5 className="text-sm leading-snug font-bold text-slate-900 mb-1 pr-6" title={company.nom_complet || company.nom_raison_sociale}>{company.nom_complet || company.nom_raison_sociale}</h5>
+                                      <h5 className="text-xs leading-snug font-bold text-slate-900 mb-1 pr-6" title={company.nom_complet || company.nom_raison_sociale}>{company.nom_complet || company.nom_raison_sociale}</h5>
                                     </div>
                                     <div className="text-xs font-medium text-slate-500 flex items-center gap-2 mt-4 pt-4 border-t border-slate-100">
                                       <span className="bg-slate-50 px-2 py-1 rounded border border-slate-100">SIREN: {company.siren}</span>
